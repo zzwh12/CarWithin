@@ -14,6 +14,9 @@ CarWithin runs CarPlay on the same iPhone that generates its interface. Use CarP
 - Download `CarWithin-1.0.3-unsigned.ipa` and sign and install it with an IPA sideloading tool using your own signing setup. Follow any iOS prompts for developer trust or Developer Mode.
 - The minimum installation target is iOS/iPadOS 16.0 on arm64; iOS 15 is not supported. Same-device CarPlay, audio, and background behavior still need testing on iOS 16.x hardware. CarWithin uses private iOS interfaces. Compatibility depends on the device, OS version, and signing setup, and OS updates can affect it.
 
+- If an IPA built from source reports a missing MFi identity, tap **导入 MFi 身份文件夹** on the home screen. In Files, select the folder containing the `certificate.p7b`, `leaf.cer` and `private.x963` files you are authorized to use. Once the app verifies and stores them, you can start local CarPlay.
+- When upgrading from a working build, keep the original signing team and App ID to retain access to its Keychain items. An identity loaded solely from the old app bundle was available only to that build.
+
 ## Quick start
 
 1. **Use CarPlay on the iPhone.** Open CarWithin, save your Wi-Fi details in the app if prompted, and start CarPlay. Once the display appears, you can use touch controls or switch to fullscreen.

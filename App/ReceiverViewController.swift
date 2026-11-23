@@ -168,6 +168,8 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     private let bluetoothSetupSwitch = UISwitch()
     private var needsNetworkDetails: Bool { modeControl.selectedSegmentIndex != 0 || bluetoothSetupSwitch.isOn }
     private let startButton = UIButton(type: .system)
+    private let identityImportButton = UIButton(type: .system)
+    private weak var identityFolderPicker: UIDocumentPickerViewController?
     private let heading = UILabel()
     private let explanation = UILabel()
     private let statusLabel = UILabel()
@@ -367,6 +369,10 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         startButton.configuration?.imagePadding = 8
         startButton.configuration?.contentInsets = NSDirectionalEdgeInsets(top: 18, leading: 24, bottom: 18, trailing: 24)
         heroStack.addArrangedSubview(startButton)
+        identityImportButton.configuration = .tinted()
+        identityImportButton.setTitle("导入 MFi 身份文件夹", for: .normal)
+        identityImportButton.addAction(UIAction { [weak self] _ in self?.chooseIdentityFolder() }, for: .touchUpInside)
+        heroStack.addArrangedSubview(identityImportButton)
 
         let browserIcon = UIImageView(image: UIImage(systemName: "globe"))
         browserIcon.tintColor = .systemGreen; browserIcon.contentMode = .scaleAspectFit
@@ -1365,21 +1371,42 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
                 identity = try AccessoryIdentityStore.importFromDocuments()
                 log("MFi 身份验证通过并已保存到本机 Keychain")
                 saveIdentityImportResult("success: MFi 身份已验证并保存到 Keychain")
-            } else if let keychainIdentity = try? AccessoryIdentityStore.load() {
-                identity = keychainIdentity
-                log("已从 Keychain 载入 MFi 身份，ECDSA 自检通过")
             } else {
-                identity = try AccessoryIdentityStore.loadFromBundle()
-                log("已从内置资源载入 MFi 身份，ECDSA 自检通过")
+                do { identity = try AccessoryIdentityStore.loadIfStored() }
+                catch {
+                    log("无法读取本机 MFi 钥匙串：\(error.localizedDescription)")
+                    identity = nil
+                }
+                if identity != nil {
+                    log("已从 Keychain 载入 MFi 身份，ECDSA 自检通过")
+                } else if let bundled = try AccessoryIdentityStore.loadFromBundle() {
+                    identity = bundled
+                    log("已从内置资源载入 MFi 身份，ECDSA 自检通过")
+                } else {
+                    log("当前安装未载入钥匙串身份，安装包未附带 MFi 身份。App ID：\(Bundle.main.bundleIdentifier ?? "未知")。曾使用旧版时，请核对两次安装的签名团队及 App ID。")
+                }
             }
-            startButton.isEnabled = true
-            statusLabel.text = "可以开始连接"
+            startButton.isEnabled = identity != nil
+            statusLabel.text = identity == nil ? "需要导入 MFi 身份" : "可以开始连接"
         } catch {
             identity = nil
             statusLabel.text = "尚未导入有效的 MFi 身份"; startButton.isEnabled = false
-            log("请通过 Documents/IdentityImport 导入 certificate.p7b、leaf.cer 和 private.x963。错误：\(error.localizedDescription)")
+            log("载入 MFi 身份失败：\(error.localizedDescription)")
             if importing { saveIdentityImportResult("failure: \(error.localizedDescription)") }
         }
+    }
+    private func chooseIdentityFolder() {
+        guard identity == nil, !running, !waitingForNetwork else { return }
+        let prompt = UIAlertController(title: "导入 MFi 身份", message: "选择包含 certificate.p7b、leaf.cer 和 private.x963 的文件夹。请使用配件提供方授权给你的身份文件。", preferredStyle: .alert)
+        prompt.addAction(UIAlertAction(title: "取消", style: .cancel))
+        prompt.addAction(UIAlertAction(title: "选择文件夹", style: .default) { [weak self] _ in
+            guard let self else { return }
+            let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
+            picker.delegate = self
+            self.identityFolderPicker = picker
+            self.present(picker, animated: true)
+        })
+        present(prompt, animated: true)
     }
     private func saveIdentityImportResult(_ result: String) {
         guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
@@ -1668,6 +1695,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         refreshNetworkSummary()
         refreshVideoOutputSummary()
         startButton.isEnabled = identity != nil
+        identityImportButton.isHidden = identity != nil
         startButton.configuration?.image = UIImage(systemName: "play.fill")
         startButton.setTitle(remote ? "连接到 iPad" : local ? "启动本机 CarPlay" : "启动 CarPlay 接收屏", for: .normal)
         statusLabel.text = identity == nil ? "需要导入 MFi 身份" : remote ? "请选择接收端" : "准备就绪"
@@ -3005,6 +3033,29 @@ extension ReceiverViewController: DataScannerViewControllerDelegate {
 extension ReceiverViewController: UIDocumentPickerDelegate {
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
         guard let url = urls.first, !running else { return }
+        if controller === identityFolderPicker {
+            guard !waitingForNetwork, identity == nil else { return }
+            identityImportButton.isEnabled = false
+            statusLabel.text = "正在读取文件并验证 MFi 身份…"
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = Result { try AccessoryIdentityStore.importSelectedFolder(url) }
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.identityImportButton.isEnabled = true
+                    switch result {
+                    case .success(let identity):
+                        self.identity = identity
+                        self.log("MFi 身份已从本机钥匙串载入，ECDSA 自检通过")
+                        self.modeChanged()
+                    case .failure(let error):
+                        let message = "MFi 身份导入失败：\(error.localizedDescription)"
+                        self.statusLabel.text = message
+                        self.log(message)
+                    }
+                }
+            }
+            return
+        }
         let access = url.startAccessingSecurityScopedResource()
         defer { if access { url.stopAccessingSecurityScopedResource() } }
         guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size <= 512 * 1024,
