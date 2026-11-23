@@ -2,21 +2,17 @@ import CoreImage
 import Foundation
 import VideoToolbox
 
-/// Runs codecs and UDP writes off the CarPlay receive queue.
-final class ZeehoOutput {
-    static let width = 1024
-    static let height = 480
-    static let fps = 25
-
-    private let queue = DispatchQueue(label: "CarWithin.zeeho", qos: .userInitiated)
+/// Encodes the CarPlay picture for a pull-based iOS PXC head unit.
+final class PXCH264Output {
+    private let queue = DispatchQueue(label: "CarWithin.pxc.h264", qos: .userInitiated)
     private var session: Session?
 
     deinit { stop() }
 
-    func start(localAddress: String, targetAddress: String, phone: TailingPhoneInfo, onState: @escaping (String) -> Void,
+    func start(profile: TailingDisplayProfile, localAddress: String, targetAddress: String, phone: TailingPhoneInfo, onState: @escaping (String) -> Void,
                onLog: @escaping (String) -> Void, requestKeyframe: @escaping () -> Void) {
         stop()
-        let next = Session(queue: queue, localAddress: localAddress, targetAddress: targetAddress, phone: phone, onState: onState, onLog: onLog, requestKeyframe: requestKeyframe)
+        let next = Session(queue: queue, profile: profile, localAddress: localAddress, targetAddress: targetAddress, phone: phone, onState: onState, onLog: onLog, requestKeyframe: requestKeyframe)
         session = next
         next.start()
     }
@@ -48,40 +44,37 @@ final class ZeehoOutput {
         private var encoded: Result<H264EncodedFrame, Error>?
 
         private let connection: TailingConnection
+        private let profile: TailingDisplayProfile
+        private var encoderSize: PXCPictureSize?
+        private var fps: Int { profile == .zeeho62 ? 25 : 30 }
         private var decoder: TailingH264Decoder?
         private var encoder: H264Encoder?
         private var parameters = VideoParameterSets(codec: .h264)
         private var waitingForIDR = true
         private var latest: CVPixelBuffer?
-        private lazy var compositor = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
-        private var fresh = false
-        private let origin = ProcessInfo.processInfo.systemUptime
-        private var lastFrame = -Double.infinity
+        private lazy var compositor = CIContext(options: [.useSoftwareRenderer: profile == .zeeho62, .cacheIntermediates: false])
         private var lastKeyframe = -Double.infinity
         private var lastCodecFailure = -Double.infinity
-        private var nextHeartbeat = 0.0
-        private var counter: UInt32 = 0
-        private var lastReply: Double?
-        private var sentPicture = false
         private var status = ""
 
-        init(queue: DispatchQueue, localAddress: String, targetAddress: String, phone: TailingPhoneInfo, onState: @escaping (String) -> Void, onLog: @escaping (String) -> Void,
+        init(queue: DispatchQueue, profile: TailingDisplayProfile, localAddress: String, targetAddress: String, phone: TailingPhoneInfo, onState: @escaping (String) -> Void, onLog: @escaping (String) -> Void,
              requestKeyframe: @escaping () -> Void) {
             self.queue = queue
+            self.profile = profile
             self.connection = TailingConnection(localIP: localAddress, targetIP: targetAddress,
-                profile: .zeeho62, phone: phone, log: onLog)
+                profile: profile, phone: phone, log: onLog)
             self.onState = onState
             self.onLog = onLog
             self.requestKeyframe = requestKeyframe
         }
 
         func start() {
-            report("正在连接极核仪表…")
+            report("正在连接\(profile.name)…")
             DispatchQueue.global(qos: .userInitiated).async { [self] in
                 do {
                     try connection.start()
                     guard active else { return }
-                    report("仪表已连接，等待 CarPlay 画面…")
+                    report("\(profile.name)已建立视频通道，等待 CarPlay 画面…")
                     var first = true
                     var nextFrame = ProcessInfo.processInfo.systemUptime
                     while active {
@@ -91,11 +84,11 @@ final class ZeehoOutput {
                         let remaining = nextFrame - ProcessInfo.processInfo.systemUptime
                         if remaining > 0 { Thread.sleep(forTimeInterval: min(remaining, 0.04)); continue }
                         try connection.waitForH264Request()
-                        nextFrame = ProcessInfo.processInfo.systemUptime + 1.0 / Double(ZeehoOutput.fps)
-                        guard active else { break }
+                        nextFrame = ProcessInfo.processInfo.systemUptime + 1.0 / Double(fps)
+                        guard active, let size = connection.negotiatedSize else { break }
                         let result = queue.sync { () -> H264EncodedFrame? in
                             guard active, let image = latest else { return nil }
-                            return encode(image, at: ProcessInfo.processInfo.systemUptime, forceKeyframe: first)
+                            return encode(image, size: size, at: ProcessInfo.processInfo.systemUptime, forceKeyframe: first)
                         }
                         guard let result else {
                             // Preserve the pending pull request until an encodable frame is available.
@@ -104,23 +97,23 @@ final class ZeehoOutput {
                                 Thread.sleep(forTimeInterval: 0.05)
                                 recovered = queue.sync {
                                     guard let image = latest else { return nil }
-                                    return encode(image, at: ProcessInfo.processInfo.systemUptime, forceKeyframe: true)
+                                    return encode(image, size: size, at: ProcessInfo.processInfo.systemUptime, forceKeyframe: true)
                                 }
                             }
                             guard let recovered else { throw TailingError.timeout("等待 H.264 编码画面") }
                             try connection.sendH264(recovered.data)
                             first = false
-                            report("正在投屏 · 1024×480 · H.264")
+                            report("正在发送 · \(size.width)×\(size.height) · H.264")
                             continue
                         }
                         try connection.sendH264(result.data)
                         first = false
-                        report("正在投屏 · 1024×480 · H.264")
+                        report("正在发送 · \(size.width)×\(size.height) · H.264")
                     }
                 } catch {
                     if active {
-                        onLog("极核输出失败：\(error.localizedDescription)")
-                        report("极核连接失败：\(error.localizedDescription)")
+                        onLog("\(profile.name)输出失败：\(error.localizedDescription)")
+                        report("\(profile.name)连接失败：\(error.localizedDescription)")
                     }
                 }
                 connection.close()
@@ -189,7 +182,7 @@ final class ZeehoOutput {
                     return (decoded, decodeError)
                 }
                 if let error { throw error }
-                if let image { latest = image; fresh = true }
+                if let image { latest = image }
             } catch {
                 decoder?.invalidate()
                 decoder = nil
@@ -200,19 +193,25 @@ final class ZeehoOutput {
             }
         }
 
-        private func encode(_ image: CVPixelBuffer, at now: Double, forceKeyframe: Bool) -> H264EncodedFrame? {
+        private func encode(_ image: CVPixelBuffer, size: PXCPictureSize, at now: Double, forceKeyframe: Bool) -> H264EncodedFrame? {
             do {
+                if encoderSize != size {
+                    encoder?.invalidate()
+                    encoder = nil
+                    encoderSize = size
+                }
                 if encoder == nil {
                     guard now - lastCodecFailure >= 0.5 else { return nil }
-                    encoder = try H264Encoder(width: ZeehoOutput.width, height: ZeehoOutput.height,
-                                              fps: ZeehoOutput.fps, bitrate: 2_500_000) { [weak self] result in
+                    let bitrate = profile == .zeeho62 ? 2_500_000 : min(8_000_000, max(1_000_000, size.width * size.height * 4))
+                    encoder = try H264Encoder(width: size.width, height: size.height,
+                                              fps: fps, bitrate: bitrate) { [weak self] result in
                         guard let self else { return }
                         self.lock.withLock { self.encoded = result }
                     }
                     lastKeyframe = -.infinity
                 }
                 guard let encoder else { return nil }
-                try encoder.encode(try fittedImage(image), presentationTime: CMTime(seconds: now, preferredTimescale: 1_000_000),
+                try encoder.encode(try fittedImage(image, size: size), presentationTime: CMTime(seconds: now, preferredTimescale: 1_000_000),
                                    forceKeyframe: forceKeyframe || lastKeyframe == -.infinity)
                 encoder.complete()
                 let result = lock.withLock {
@@ -234,13 +233,13 @@ final class ZeehoOutput {
             }
         }
 
-        private func fittedImage(_ image: CVPixelBuffer) throws -> CVPixelBuffer {
-            let width = ZeehoOutput.width, height = ZeehoOutput.height
+        private func fittedImage(_ image: CVPixelBuffer, size: PXCPictureSize) throws -> CVPixelBuffer {
+            let width = size.width, height = size.height
             if CVPixelBufferGetWidth(image) == width, CVPixelBufferGetHeight(image) == height { return image }
             var buffer: CVPixelBuffer?
             let status = CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA,
                                              [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer)
-            guard status == kCVReturnSuccess, let buffer else { throw ConfigurationError("无法分配极核缩放画面（\(status)）") }
+            guard status == kCVReturnSuccess, let buffer else { throw ConfigurationError("无法分配投屏画面（\(status)）") }
             let source = CIImage(cvPixelBuffer: image)
             let scale = min(CGFloat(width) / source.extent.width, CGFloat(height) / source.extent.height)
             let scaled = source.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
@@ -255,7 +254,7 @@ final class ZeehoOutput {
 
         private func logCodecFailure(_ stage: String, _ error: Error) {
             let now = ProcessInfo.processInfo.systemUptime
-            if now - lastCodecFailure > 4 { onLog("极核\(stage)恢复：\(error.localizedDescription)") }
+            if now - lastCodecFailure > 4 { onLog("\(profile.name)\(stage)恢复：\(error.localizedDescription)") }
             lastCodecFailure = now
         }
 
@@ -266,13 +265,6 @@ final class ZeehoOutput {
                 guard let self, self.active else { return }
                 self.onState(message)
             }
-        }
-
-        private func fail(_ error: Error) {
-            let message = "极核输出失败：\(error.localizedDescription)"
-            onLog(message)
-            report(message)
-            close()
         }
 
         func close() {

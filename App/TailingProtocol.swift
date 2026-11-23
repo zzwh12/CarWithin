@@ -115,11 +115,11 @@ enum TailingError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .protocolFailure(let text): return "台铃协议：\(text)"
-        case .timeout(let text): return "台铃等待超时：\(text)"
-        case .closed: return "台铃会话已关闭"
+        case .protocolFailure(let text): return "PXC 协议：\(text)"
+        case .timeout(let text): return "PXC 等待超时：\(text)"
+        case .closed: return "PXC 会话已关闭"
         case .channel(let name, let error): return "\(name)：\(error.localizedDescription)"
-        case .system(let text, let code): return "台铃\(text)失败（\(code)）"
+        case .system(let text, let code): return "\(text)失败（\(code)）"
         }
     }
 }

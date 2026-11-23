@@ -26,6 +26,7 @@ struct ReceiverConfiguration {
     var carLifeEnabled = false
     /// Head unit IPv4 for CarLife discovery; nil sweeps the local network.
     var carLifeAddress: String?
+    var carbitAddress: String?
     var zeehoAddress: String?
     var ninebotAddress: String?
     var tailingAddress: String?
@@ -142,6 +143,9 @@ struct ReceiverConfiguration {
             guard inet_pton(AF_INET, carLifeAddress, &parsedCarLife) == 1 else {
                 throw ConfigurationError("CarLife 车机 IP 地址无效，请填写 IPv4 地址或留空。")
             }
+        }
+        if let carbitAddress, !CarbitConnectionCode.isLocalAddress(carbitAddress) || carbitAddress == address {
+            throw ConfigurationError("请在亿连输出设置中选择车机或填写它的局域网 IPv4 地址。")
         }
         if let zeehoAddress {
             var target = in_addr()

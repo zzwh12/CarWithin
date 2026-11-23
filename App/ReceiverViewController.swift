@@ -7,6 +7,9 @@ import CoreLocation
 import PhotosUI
 import ImageIO
 import UniformTypeIdentifiers
+#if !targetEnvironment(macCatalyst)
+import VisionKit
+#endif
 
 final class ReceiverViewController: UIViewController, CLLocationManagerDelegate {
     private let receiver = NativeReceiver()
@@ -53,7 +56,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     }()
     private var receivesAudioFromAnotherDevice: Bool { modeControl.selectedSegmentIndex == 0 }
     private var soundOutput: SoundOutput {
-        if outputMode == .carLife || outputMode == .airPlay || outputMode.usesInstrumentWiFi { return .phone }
+        if outputMode != .browser { return .phone }
         if selectedSoundOutput == .carWithin && !receivesAudioFromAnotherDevice { return .phone }
         if selectedSoundOutput == .browser && !videoOutputSwitch.isOn { return .phone }
         return selectedSoundOutput
@@ -146,6 +149,14 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         tailingStatus.text = message; tailingCardStatus.text = message
     }
     private let carLifeCard = UIStackView()
+    private let carbitCard = UIStackView()
+    private let carbitCardStatus = UILabel()
+    private let carbitStatus = StatusLabel()
+    private let carbitAddressField = UITextField()
+    private func updateCarbitStatus(_ text: String) {
+        carbitStatus.text = text
+        carbitCardStatus.text = text
+    }
     private let airPlayCard = UIStackView()
     private let carLifeCardStatus = UILabel()
     private let airPlayCardStatus = UILabel()
@@ -171,10 +182,11 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     private lazy var pictureInPicture = CarPlayPictureInPicture(surface: videoSurface)
     private let keepAlive = BackgroundKeepAlive()
     private let keepAliveSwitch = UISwitch()
-    private let headUnitOutput = ChoiceMenu(items: ["浏览器", "CarLife", "AirPlay", "台铃 4.3 寸", "九号 5 寸", "极核 6.2 寸"])
+    private let headUnitOutput = ChoiceMenu(items: ["浏览器", "CarLife", "AirPlay", "台铃 4.3 寸", "九号 5 寸", "极核 6.2 寸"]
+        + (UIDevice.current.userInterfaceIdiom == .phone ? ["亿连直连（实验）"] : []))
     private enum HeadUnitOutput: Int {
-        case browser, carLife, airPlay, tailing, ninebot, zeeho
-        var usesInstrumentWiFi: Bool { self == .tailing || self == .ninebot || self == .zeeho }
+        case browser, carLife, airPlay, tailing, ninebot, zeeho, carbit
+        var requiresWiFiInterface: Bool { [.tailing, .ninebot, .zeeho, .carbit].contains(self) }
     }
     private var airPlayStreamID: UUID?
     private var airPlayStreamURL: URL?
@@ -419,6 +431,15 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         carLifeSettings.addAction(UIAction { [weak self] _ in self?.revealSettings(output: true) }, for: .touchUpInside)
         carLifeCard.addArrangedSubview(carLifeSettings)
         stack.addArrangedSubview(carLifeCard)
+        configureConnectionCard(carbitCard, title: "亿连直连", symbol: "car.fill", color: .systemIndigo,
+            instructions: "打开车机上的亿连，让 iPhone 和车机连入同一 Wi-Fi。在连接设置中扫码或选择车机，然后启动本机 CarPlay。",
+            status: carbitCardStatus)
+        let carbitSettings = UIButton(type: .system)
+        carbitSettings.configuration = .tinted()
+        carbitSettings.configuration?.title = "连接设置"
+        carbitSettings.addAction(UIAction { [weak self] _ in self?.revealSettings(output: true) }, for: .touchUpInside)
+        carbitCard.addArrangedSubview(carbitSettings)
+        stack.addArrangedSubview(carbitCard)
 
         configureConnectionCard(zeehoCard, title: "极核 6.2 寸连接", symbol: "scooter", color: .systemBlue,
             instructions: "让 iPhone 加入极核仪表 Wi-Fi，打开仪表投屏后启动 CarPlay。", status: zeehoCardStatus)
@@ -581,6 +602,10 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         receiver.onCarLifeState = { [weak self] message in
             guard let self, self.running, self.outputMode == .carLife else { return }
             self.updateCarLifeStatus(message)
+        }
+        receiver.onCarbitState = { [weak self] message in
+            guard let self, self.running, self.outputMode == .carbit else { return }
+            self.updateCarbitStatus(message)
         }
         receiver.onBrowserDisplay = { [weak self] display, viewerID in self?.browserReportedDisplay(display, viewerID: viewerID) }
         receiver.onBrowserStruggling = { [weak self] peer, reason in self?.browserStruggling(peer: peer, reason: reason) }
@@ -746,7 +771,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         defaults.set(carButtonSwitch.isOn, forKey: "carButton")
     }
     private var selectedPerformance: BrowserPerformance { BrowserPerformance.allCases[max(0, performanceControl.selectedSegmentIndex)] }
-    private var followsCarScreen: Bool { sizeModeControl.selectedSegmentIndex == 0 }
+    private var followsCarScreen: Bool { outputMode != .carbit && sizeModeControl.selectedSegmentIndex == 0 }
     /// The screen "跟随车机" sizes for: reported in this run, else the ticked or latest saved one.
     private var targetScreen: CarScreen? { outputMode == .browser ? reportedScreen ?? CarScreenStore.preferred() : nil }
 
@@ -996,6 +1021,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         tailingCard.isHidden = !showsLocalOutput || outputMode != .tailing
         if !running { updateTailingStatus("等待启动 CarPlay · 仪表 IP：\(tailingAddressField.text ?? "192.168.1.1")") }
         carLifeCard.isHidden = !showsLocalOutput || outputMode != .carLife
+        carbitCard.isHidden = !showsLocalOutput || outputMode != .carbit
         airPlayCard.isHidden = !showsLocalOutput || outputMode != .airPlay
         browserCard.isHidden = outputMode != .browser || !videoOutputSwitch.isOn
         guard outputMode == .browser, videoOutputSwitch.isOn else { return }
@@ -1050,7 +1076,8 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         if outputMode == .ninebot {
             config.ninebotAddress = (ninebotAddressField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        if outputMode.usesInstrumentWiFi {
+        if outputMode == .carbit { config.carbitAddress = carbitAddress }
+        if outputMode.requiresWiFiInterface {
             let screen = view.window?.screen ?? UIScreen.main
             let orientation = view.window?.windowScene?.interfaceOrientation
             let rotation: Int
@@ -1365,6 +1392,11 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     }
     @objc private func toggleReceiver() {
         if running || waitingForNetwork { stop(); return }
+        if modeControl.selectedSegmentIndex != 2, outputMode == .carbit, !CarbitConnectionCode.isLocalAddress(carbitAddress) {
+            updateCarbitStatus("请先扫码、查找车机或填写车机的局域网 IPv4 地址。")
+            revealSettings(output: true)
+            return
+        }
         if !restartingAutomatically { networkRestartCount = 0 }
         clearStartupHint()
         updateCheckTask?.cancel()
@@ -1490,7 +1522,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         receiver.start(configuration: config, identity: identity)
     }
     private var localCarPlayAddress: String? {
-        outputMode.usesInstrumentWiFi ? ReceiverConfiguration.wifiIPv4Address() : browserAddress
+        outputMode.requiresWiFiInterface ? ReceiverConfiguration.wifiIPv4Address() : browserAddress
     }
 
     private func refreshNetworkAddresses() {
@@ -1568,6 +1600,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         airPlayRetryButton.isHidden = true
         updateAirPlayStatus("等待启动 CarPlay。")
         updateCarLifeStatus("等待启动 CarPlay。")
+        updateCarbitStatus("等待启动 CarPlay。")
         running = false
         sessionHasVehicleButton = false
         screenAdaptation?.cancel(); screenAdaptation = nil
@@ -1659,6 +1692,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         ninebotAddressField.isEnabled = value
         tailingAddressField.isEnabled = value
         carLifeAddressField.isEnabled = value
+        carbitAddressField.isEnabled = value
     }
     @objc private func willResignActive() {
         guard running else { return }
@@ -1884,8 +1918,13 @@ extension ReceiverViewController {
         let previousOutput = defaults.object(forKey: "headUnitOutput") as? Int
         let legacyOutput: HeadUnitOutput = defaults.bool(forKey: "carLifeEnabled") ? .carLife : .browser
         let migratedOutput = previousOutput.map { $0 == 1 ? HeadUnitOutput.carLife : .browser } ?? legacyOutput
-        headUnitOutput.selectedSegmentIndex = (savedOutput.flatMap(HeadUnitOutput.init(rawValue:)) ?? migratedOutput).rawValue
+        let restored = (savedOutput.flatMap(HeadUnitOutput.init(rawValue:)) ?? migratedOutput).rawValue
+        headUnitOutput.selectedSegmentIndex = restored < headUnitOutput.numberOfSegments ? restored : HeadUnitOutput.browser.rawValue
         headUnitOutput.addTarget(self, action: #selector(headUnitOutputChanged), for: .valueChanged)
+        carbitAddressField.text = defaults.string(forKey: "carbitAddress")
+        carbitAddressField.keyboardType = .decimalPad
+        carbitAddressField.addTarget(self, action: #selector(saveHeadUnitOutput), for: .editingDidEnd)
+        updateCarbitStatus("等待启动 CarPlay。")
         zeehoAddressField.text = defaults.string(forKey: "zeehoAddress") ?? "192.168.0.1"
         zeehoAddressField.keyboardType = .decimalPad
         zeehoAddressField.addTarget(self, action: #selector(saveHeadUnitOutput), for: .editingDidEnd)
@@ -1918,7 +1957,7 @@ extension ReceiverViewController {
         }
         nameField.addTarget(self, action: #selector(receiverNameChanged), for: .editingDidEnd)
         channelField.keyboardType = .numberPad
-        [nameField, ipField, ssidField, passwordField, channelField, carLifeAddressField, tailingAddressField, ninebotAddressField, zeehoAddressField, videoOutputPortField, secureVideoOutputPortField, httpsDomainField, httpsTokenField].forEach {
+        [nameField, ipField, ssidField, passwordField, channelField, carLifeAddressField, tailingAddressField, ninebotAddressField, zeehoAddressField, carbitAddressField, videoOutputPortField, secureVideoOutputPortField, httpsDomainField, httpsTokenField].forEach {
             $0.returnKeyType = .done
             $0.addTarget($0, action: #selector(UIResponder.resignFirstResponder), for: .editingDidEndOnExit)
             if $0.inputAccessoryView == nil {
@@ -1935,6 +1974,7 @@ extension ReceiverViewController {
 
     @objc private func saveHeadUnitOutput() {
         UserDefaults.standard.set(outputMode.rawValue, forKey: "headUnitOutputV2")
+        UserDefaults.standard.set(carbitAddress, forKey: "carbitAddress")
         UserDefaults.standard.set(carLifeAddressField.text ?? "", forKey: "carLifeAddress")
         UserDefaults.standard.set(zeehoAddressField.text ?? "", forKey: "zeehoAddress")
         UserDefaults.standard.set(ninebotAddressField.text ?? "", forKey: "ninebotAddress")
@@ -2155,7 +2195,8 @@ extension ReceiverViewController {
                 SettingsSection("连接与输出", connection),
                 SettingsSection("CarPlay", [
                     .page("画面", icon: ("rectangle.on.rectangle", .systemGreen), detail: { [unowned self] in
-                        self.outputMode.usesInstrumentWiFi ? "仪表固定尺寸" : self.followsCarScreen ? "跟随车机" : self.resolutionControl.selectedTitle.components(separatedBy: "（").first
+                        if self.outputMode == .carbit { return "按车机请求输出" }
+                        return self.outputMode.requiresWiFiInterface ? "仪表固定尺寸" : self.followsCarScreen ? "跟随车机" : self.resolutionControl.selectedTitle.components(separatedBy: "（").first
                     }) { [unowned self] in self.displayPage() },
                     .control("CarPlay 外观", icon: ("circle.lefthalf.filled", .systemBlue), appearanceControl),
                     .page("声音", icon: ("speaker.wave.2.fill", .systemOrange), detail: { [unowned self] in
@@ -2190,6 +2231,18 @@ extension ReceiverViewController {
 
     fileprivate func displayPage() -> SettingsPageController {
         page("画面") { [unowned self] in
+            if outputMode == .carbit {
+                return [
+                    SettingsSection("亿连画面", footer: "按车机请求的尺寸等比缩放 CarPlay 画面，宽高比不同时保留黑边。", [
+                        .info("车机视频", "H.264 · 最高 1920×1080 · 30 FPS")
+                    ]),
+                    SettingsSection("本机 CarPlay", [
+                        .control("分辨率", icon: ("display", .systemGreen), resolutionControl),
+                        .control("画面比例", icon: ("aspectratio", .systemGreen), aspectRatioControl),
+                        .control("CarPlay 图标大小", icon: ("square.grid.2x2.fill", .systemPurple), iconSizeControl)
+                    ])
+                ]
+            }
             if outputMode == .zeeho {
                 return [
                     SettingsSection("极核 6.2 寸", [.info("仪表画面", "1024×480 · H.264 · 25 FPS")]),
@@ -2511,6 +2564,7 @@ extension ReceiverViewController {
         page("输出设置") { [unowned self] in
             switch outputMode {
             case .browser: return browserOutputSections()
+            case .carbit: return carbitOutputSections()
             case .carLife: return carLifeOutputSections()
             case .airPlay: return airPlayOutputSections()
             case .tailing: return tailingOutputSections()
@@ -2526,6 +2580,48 @@ extension ReceiverViewController {
                 ])]
             }
         }
+    }
+
+    private var carbitAddress: String {
+        (carbitAddressField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func carbitOutputSections() -> [SettingsSection] {
+        var rows: [SettingsRow] = []
+        if !running && !waitingForNetwork {
+            #if !targetEnvironment(macCatalyst)
+            rows.append(.action("扫描车机二维码", icon: ("qrcode.viewfinder", .systemIndigo)) { [weak self] in self?.scanCarbitCode() })
+            #endif
+            rows.append(.page("查找局域网车机", icon: ("wifi", .systemBlue)) { [unowned self] in self.carbitDiscoveryPage() })
+        }
+        rows.append(.field("车机 IP", carbitAddressField, placeholder: "车机的局域网 IPv4"))
+        rows.append(.note(carbitStatus))
+        return [SettingsSection("亿连直连（实验）", footer: "在车机打开亿连，iPhone 加入与车机互通的 Wi-Fi 并保存同名预设。CarWithin 直接与车机协商 H.264 视频。声音走 iPhone 或蓝牙，触控在 iPhone 上操作。", rows)]
+    }
+
+    private func carbitDiscoveryPage() -> SettingsPageController {
+        let browser = TDSCarKitReceiverBrowser(serviceType: CarbitConnectionCode.serviceType)
+        var targets: [TDSCarKitReceiverBrowser.Target] = []
+        var help = "正在此 Wi-Fi 查找亿连服务。若车机未广播服务，可返回填写车机 IP。"
+        let controller = page("选择亿连车机") { [unowned self] in
+            [SettingsSection(footer: help, targets.map { target in
+                .action(target.name, detail: { target.address }) { [weak self] in
+                    guard let self, !self.running, !self.waitingForNetwork else { return }
+                    self.carbitAddressField.text = target.address
+                    self.saveHeadUnitOutput()
+                    self.updateCarbitStatus("已选择 \(target.name)，启动 CarPlay 后连接。")
+                    self.settingsNavigation?.popViewController(animated: true)
+                }
+            })]
+        }
+        browser.onTargets = { [weak controller] found in targets = found; controller?.reload() }
+        browser.onDiscoveryFailure = { [weak controller] in
+            help = "未能发现车机，请检查本地网络权限和 Wi-Fi 连接。"
+            controller?.reload()
+        }
+        controller.onAppear = { targets = []; browser.start() }
+        controller.onLeave = { browser.stop() }
+        return controller
     }
 
     private func airPlayOutputSections() -> [SettingsSection] {
@@ -2853,6 +2949,58 @@ extension ReceiverViewController {
     }
 
 }
+
+#if !targetEnvironment(macCatalyst)
+extension ReceiverViewController: DataScannerViewControllerDelegate {
+    private func scanCarbitCode() {
+        guard DataScannerViewController.isSupported else {
+            alert("当前 iPhone 无法使用实时扫码", "请使用「查找局域网车机」，或手动输入车机 IP。")
+            return
+        }
+        Task { [weak self] in
+            let granted = await AVCaptureDevice.requestAccess(for: .video)
+            guard let self, !running, !waitingForNetwork, let navigation = settingsNavigation,
+                  navigation.presentedViewController == nil else { return }
+            guard granted, DataScannerViewController.isAvailable else {
+                alert("相机不可用", "请允许相机权限，或使用「查找局域网车机」。")
+                return
+            }
+            let scanner = DataScannerViewController(recognizedDataTypes: [.barcode(symbologies: [.qr])],
+                                                   recognizesMultipleItems: false, isHighlightingEnabled: true)
+            scanner.delegate = self
+            scanner.title = "点按车机二维码"
+            scanner.navigationItem.leftBarButtonItem = UIBarButtonItem(systemItem: .cancel, primaryAction: UIAction { [weak scanner] _ in
+                scanner?.stopScanning()
+                scanner?.dismiss(animated: true)
+            })
+            navigation.present(UINavigationController(rootViewController: scanner), animated: true) {
+                do { try scanner.startScanning() }
+                catch {
+                    scanner.dismiss(animated: true) { self.alert("无法开始扫码", "请查找局域网车机或手动输入 IP。") }
+                }
+            }
+        }
+    }
+
+    func dataScanner(_ dataScanner: DataScannerViewController, didTapOn item: RecognizedItem) {
+        guard case .barcode(let barcode) = item, let text = barcode.payloadStringValue else { return }
+        dataScanner.stopScanning()
+        let code = CarbitConnectionCode(text)
+        dataScanner.dismiss(animated: true) { [weak self] in
+            guard let self, self.outputMode == .carbit, !self.running, !self.waitingForNetwork else { return }
+            // A new QR code must never silently reuse the previous vehicle's address.
+            self.carbitAddressField.text = code.address
+            self.saveHeadUnitOutput()
+            let network = code.ssid.map { "请先加入 Wi-Fi「\($0)」。" } ?? ""
+            if let ip = code.address {
+                self.updateCarbitStatus("\(network)已读取车机地址 \(ip)，可启动 CarPlay。")
+            } else {
+                self.updateCarbitStatus("\(network)二维码中未找到局域网地址。请在同一 Wi-Fi 下查找车机，或填写车机 IP。")
+            }
+        }
+    }
+}
+#endif
 
 extension ReceiverViewController: UIDocumentPickerDelegate {
     func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {

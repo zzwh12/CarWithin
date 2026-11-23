@@ -49,8 +49,10 @@ Media/FrameCompositor.swift and Networking/MirrorSession.swift.
 App/NinebotProtocol.swift, NinebotUDPSocket.swift and NinebotH264Encoder.swift
 adapt xmz28's Ninebot Pro iOS H.264 packetizer, UDP socket and VideoToolbox encoder.
 
-ZeehoOutput and the PXC H.264 session adapt xmz28 Ninebot Pro iOS
+PXCH264Output and the PXC H.264 session adapt xmz28 Ninebot Pro iOS
 Networking/TailingConnection.swift, TailingProtocol.swift and Media/H264Encoder.swift.
+The _EasyConn._tcp service name used for CarbitLink discovery is also documented
+in AA-Bridge: https://github.com/alimorgaan/AA-Bridge/blob/main/docs/CarbitLink-Protocol.md
 
 The complete combined distribution includes AGPL-3.0-only code and is distributed
 under AGPL-3.0-only. Components retain the licenses noted above.

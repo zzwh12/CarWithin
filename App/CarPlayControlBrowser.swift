@@ -26,6 +26,11 @@ final class CarPlayControlBrowser {
 /// Explicitly choose a TDS Car Kit
 /// receiver, then use the source iPhone's accessory transport to request that display.
 final class TDSCarKitReceiverBrowser: NSObject, NetServiceBrowserDelegate, NetServiceDelegate {
+    private let serviceType: String
+    init(serviceType: String = ReceiverConfiguration.discoveryType) {
+        self.serviceType = serviceType
+        super.init()
+    }
     struct Target: Equatable {
         let name: String
         let address: String
@@ -36,11 +41,12 @@ final class TDSCarKitReceiverBrowser: NSObject, NetServiceBrowserDelegate, NetSe
     private var services: [NetService] = []
     private var resolved: [ObjectIdentifier: Target] = [:]
     var onTargets: (([Target]) -> Void)?
+    var onDiscoveryFailure: (() -> Void)?
     var onLog: ((String) -> Void)?
     func start() {
         stop()
         let browser = NetServiceBrowser(); self.browser = browser; browser.delegate = self
-        browser.searchForServices(ofType: ReceiverConfiguration.discoveryType, inDomain: "local.")
+        browser.searchForServices(ofType: serviceType, inDomain: "local.")
     }
     func stop() {
         browser?.delegate = nil; browser?.stop(); browser = nil
@@ -57,16 +63,23 @@ final class TDSCarKitReceiverBrowser: NSObject, NetServiceBrowserDelegate, NetSe
         services.removeAll { candidate in removed.contains { $0 === candidate } }; publish()
     }
     func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {
+        guard browser === self.browser else { return }
         onLog?("接收端发现失败：\(errorDict)")
+        onDiscoveryFailure?()
     }
     func netServiceDidResolveAddress(_ sender: NetService) {
-        guard services.contains(where: { $0 === sender }), let txtData = sender.txtRecordData() else { return }
-        let txt = NetService.dictionary(fromTXTRecord: txtData)
-        guard txt["app"] == Data("TDSCarKit".utf8),
-              let deviceID = txt["deviceid"].flatMap({ String(data: $0, encoding: .utf8) }),
-              deviceID.range(of: "^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$", options: .regularExpression) != nil,
-              deviceID.caseInsensitiveCompare(ReceiverConfiguration.persistentDeviceID()) != .orderedSame,
+        guard services.contains(where: { $0 === sender }),
               let port = UInt16(exactly: sender.port), port > 0 else { return }
+        var deviceID: String?
+        if serviceType == ReceiverConfiguration.discoveryType {
+            guard let txtData = sender.txtRecordData() else { return }
+            let txt = NetService.dictionary(fromTXTRecord: txtData)
+            guard txt["app"] == Data("TDSCarKit".utf8),
+                  let id = txt["deviceid"].flatMap({ String(data: $0, encoding: .utf8) }),
+                  id.range(of: "^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$", options: .regularExpression) != nil,
+                  id.caseInsensitiveCompare(ReceiverConfiguration.persistentDeviceID()) != .orderedSame else { return }
+            deviceID = id
+        }
         for data in sender.addresses ?? [] {
             var address = sockaddr_in()
             guard data.count >= MemoryLayout<sockaddr_in>.size else { continue }
@@ -76,7 +89,9 @@ final class TDSCarKitReceiverBrowser: NSObject, NetServiceBrowserDelegate, NetSe
             guard numeric >> 24 != 0, numeric >> 24 != 127, numeric >> 24 < 224 else { continue }
             var buffer = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
             guard inet_ntop(AF_INET, &address.sin_addr, &buffer, socklen_t(buffer.count)) != nil else { continue }
-            let target = Target(name: sender.name, address: String(cString: buffer), port: port, deviceID: deviceID)
+            let ip = String(cString: buffer)
+            if serviceType == CarbitConnectionCode.serviceType, !CarbitConnectionCode.isLocalAddress(ip) { continue }
+            let target = Target(name: sender.name, address: ip, port: port, deviceID: deviceID ?? ip)
             resolved[ObjectIdentifier(sender)] = target
             onLog?("发现接收端 \(target.name)，地址 \(target.address):\(target.port)")
             publish(); return

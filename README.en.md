@@ -74,6 +74,14 @@ Some connection settings are locked while CarPlay is running; stop the session b
 
 Fixed display sizes support common landscape and portrait aspect ratios.
 
+### CarbitLink direct output (experimental)
+
+1. Open the QR connection screen in the head unit's CarbitLink app. On iPhone, select **Settings → Current output → 亿连直连（实验）** in CarWithin. Open **Output settings → 扫描车机二维码** and tap the QR code in the camera view.
+2. Join a Wi-Fi network that allows the iPhone and head unit to reach each other and select or save the matching Wi-Fi preset in CarWithin. Scanning fills in the head unit IP when the code contains a private IPv4 address. If it contains only a network name, download link or pairing token, use **查找局域网车机** to select an advertised head unit or enter its known IP.
+3. Start local CarPlay. Once the head unit accepts the iOS PXC session and requests video, the connection card shows the resolution being sent. Video uses H.264 at up to 1920×1080 and 30 fps. Use the iPhone for touch and route audio through the iPhone or car Bluetooth.
+
+CarWithin connects with its own application identity and sends the local CarPlay picture. QR codes are processed on the iPhone. This mode requires local network projection support. Firmware that requires cloud pairing is unsupported. The factory Ford Mondeo head unit still needs an in-car test. [Carbit connectivity overview](https://carbit.com.cn/new/connect)
+
 ### ZEEHO AE4 MAX2+ 6.2-inch display
 
 Connect the iPhone to the instrument Wi-Fi, select the matching preset and choose ZEEHO 6.2-inch under Current output. Open projection on the instrument, then start CarPlay. The default instrument IP is 192.168.0.1. Video uses H.264 at 1024×480 and up to 25 fps. Audio plays through the iPhone or Bluetooth. Operate CarPlay on the phone.

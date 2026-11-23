@@ -47,8 +47,9 @@ final class NativeReceiver {
     private var airPlayIdentity: AirPlayCredentials?
     private let videoOutput = VideoOutputServer()
     private let carLife = CarLifeOutput()
-    private let zeeho = ZeehoOutput()
+    private let pxcVideoOutput = PXCH264Output()
     var onZeehoState: ((String) -> Void)?
+    var onCarbitState: ((String) -> Void)?
     private let ninebot = NinebotOutput()
     var onNinebotState: ((String) -> Void)?
     private let tailing = TailingOutput()
@@ -91,15 +92,19 @@ final class NativeReceiver {
                 DispatchQueue.main.async { self?.onBrowserDisplay?(display, viewerID) }
             }
             self.videoOutput.onStruggling = { [weak self] peer, reason in DispatchQueue.main.async { self?.onBrowserStruggling?(peer, reason) } }
-            if let target = configuration.zeehoAddress {
+            if let target = configuration.carbitAddress ?? configuration.zeehoAddress {
+                let profile: TailingDisplayProfile = configuration.carbitAddress == nil ? .zeeho62 : .carbit
                 let phone = configuration.tailingPhoneInfo ?? TailingPhoneInfo(package: Bundle.main.bundleIdentifier ?? "CarWithin",
                     versionCode: Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0") ?? 0,
                     model: "iPhone", systemVersion: ProcessInfo.processInfo.operatingSystemVersionString,
                     width: configuration.width, height: configuration.height, rotation: 1)
-                self.zeeho.start(localAddress: configuration.address, targetAddress: target, phone: phone,
-                    onState: { [weak self] in self?.onZeehoState?($0) },
+                self.pxcVideoOutput.start(profile: profile, localAddress: configuration.address, targetAddress: target, phone: phone,
+                    onState: { [weak self] message in
+                        if profile == .carbit { self?.onCarbitState?(message) }
+                        else { self?.onZeehoState?(message) }
+                    },
                     onLog: { [weak self] in self?.log($0) },
-                    requestKeyframe: { [weak self] in self?.requestKeyFrame(reason: "极核解码恢复") })
+                    requestKeyframe: { [weak self] in self?.requestKeyFrame(reason: "\(profile.name)解码恢复") })
             }
             if let target = configuration.ninebotAddress {
                 self.ninebot.start(localAddress: configuration.address, targetAddress: target,
@@ -319,7 +324,7 @@ final class NativeReceiver {
         generation = UUID(); listener?.cancel(); listener = nil
         videoOutput.stop()
         carLife.stop()
-        zeeho.stop()
+        pxcVideoOutput.stop()
         ninebot.stop()
         tailing.stop()
         carLink.stop()
@@ -415,7 +420,9 @@ final class NativeReceiver {
                     let keyframe = Self.containsRandomAccess(data, codec: codec)
                     if keyframe { self.keyframeArrived() }
                     self.videoOutput.append(data, codec: codec)
-                    if configuration.zeehoAddress != nil { self.zeeho.append(data, codec: codec, keyframe: keyframe) }
+                    if configuration.carbitAddress != nil || configuration.zeehoAddress != nil {
+                        self.pxcVideoOutput.append(data, codec: codec, keyframe: keyframe)
+                    }
                     if configuration.ninebotAddress != nil { self.ninebot.append(data, codec: codec, keyframe: keyframe) }
                     if configuration.tailingAddress != nil { self.tailing.append(data, codec: codec) }
                     if configuration.carLifeEnabled { self.carLife.append(data, codec: codec) }
