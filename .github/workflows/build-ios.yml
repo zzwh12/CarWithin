@@ -31,7 +31,7 @@ jobs:
         run: |
           app="$RUNNER_TEMP/DerivedData/Build/Products/Release-iphoneos/TDSCarKit.app"
           executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Info.plist")
-          lipo -verify_arch arm64 "$app/$executable"
+          lipo "$app/$executable" -verify_arch arm64
           mkdir -p "$RUNNER_TEMP/package/Payload"
           ditto "$app" "$RUNNER_TEMP/package/Payload/TDSCarKit.app"
           cd "$RUNNER_TEMP/package"
