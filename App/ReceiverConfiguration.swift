@@ -85,6 +85,11 @@ struct ReceiverConfiguration {
                 min(maxHeight, max(320, Int(height / 2) * 2)))
     }
 
+    static func supportsDisplaySize(width: Int, height: Int) -> Bool {
+        (320...3840).contains(width) && (320...3840).contains(height) &&
+        width.isMultiple(of: 2) && height.isMultiple(of: 2) && width * height <= 3840 * 2160
+    }
+
     static func wifiIPv4Address() -> String? {
         localIPv4Addresses(interface: "en0").first
     }
@@ -133,8 +138,7 @@ struct ReceiverConfiguration {
         }
         // Fixed presets or a size that follows the head unit: even, within 320…3840 per side and
         // at most 4K in area; frame rate 30–60 in steps of 5.
-        guard (320...3840).contains(width), (320...3840).contains(height), width % 2 == 0, height % 2 == 0,
-              width * height <= 3840 * 2160,
+        guard Self.supportsDisplaySize(width: width, height: height),
               (30...60).contains(maxFPS), maxFPS % 5 == 0, (100...400).contains(widthPhysicalMM) else {
             throw ConfigurationError("请选择受支持的分辨率和帧率。")
         }

@@ -91,7 +91,8 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     private let frameRateControl = ChoiceMenu(items: ["自动", "30 FPS", "60 FPS"])
     private let codecControl = ChoiceMenu(items: ["自动", "H.264", "H.265"])
     /// 0 = follow the head unit's screen, 1 = the fixed resolution.
-    private let sizeModeControl = ChoiceMenu(items: ["跟随车机", "固定尺寸"])
+    private let sizeModeControl = ChoiceMenu(items: ["跟随车机", "固定尺寸", "自定义尺寸"])
+    private let carbitSizeModeControl = ChoiceMenu(items: ["固定尺寸", "自定义尺寸"])
     private let iconSizeControl = ChoiceMenu(items: ReceiverConfiguration.iconSizes.map { "\($0.title)（\($0.widthMM) mm）" })
     private let autoRestartSwitch = UISwitch()
     private let performanceControl = ChoiceMenu(items: BrowserPerformance.allCases.map(\.title))
@@ -770,6 +771,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         defaults.set([0, 30, 60][max(0, frameRateControl.selectedSegmentIndex)], forKey: "displayMaxFPS")
         defaults.set(["auto", "h264", "h265"][max(0, codecControl.selectedSegmentIndex)], forKey: "videoCodec")
         defaults.set(sizeModeControl.selectedSegmentIndex, forKey: "displaySizeMode")
+        defaults.set(carbitSizeModeControl.selectedSegmentIndex == 1, forKey: "carbitCustomSizeEnabled")
         defaults.set(ReceiverConfiguration.iconSizes[max(0, iconSizeControl.selectedSegmentIndex)].widthMM, forKey: "widthPhysicalMM")
         defaults.set(selectedPerformance.rawValue, forKey: "browserPerformance")
         defaults.set(autoRestartSwitch.isOn, forKey: "autoRestart")
@@ -778,6 +780,23 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     }
     private var selectedPerformance: BrowserPerformance { BrowserPerformance.allCases[max(0, performanceControl.selectedSegmentIndex)] }
     private var followsCarScreen: Bool { outputMode != .carbit && sizeModeControl.selectedSegmentIndex == 0 }
+    private var usesCustomSize: Bool {
+        switch outputMode {
+        case .carbit: return carbitSizeModeControl.selectedSegmentIndex == 1
+        case .browser, .airPlay, .carLife: return sizeModeControl.selectedSegmentIndex == 2
+        case .tailing, .ninebot, .zeeho: return false
+        }
+    }
+    private var customSizeKey: String { outputMode == .browser ? "browserCustomDisplaySize" : "headUnitCustomDisplaySize" }
+    private func acceptsCustomSize(width: Int, height: Int) -> Bool {
+        ReceiverConfiguration.supportsDisplaySize(width: width, height: height) &&
+        (outputMode == .browser || (width <= 1920 && height <= 1080))
+    }
+    private var customSize: (width: Int, height: Int) {
+        if let pair = UserDefaults.standard.array(forKey: customSizeKey) as? [Int], pair.count == 2,
+           acceptsCustomSize(width: pair[0], height: pair[1]) { return (pair[0], pair[1]) }
+        return (1280, 720)
+    }
     /// The screen "跟随车机" sizes for: reported in this run, else the ticked or latest saved one.
     private var targetScreen: CarScreen? { outputMode == .browser ? reportedScreen ?? CarScreenStore.preferred() : nil }
 
@@ -798,8 +817,8 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
             let icon = ReceiverConfiguration.iconSizes[max(0, iconSizeControl.selectedSegmentIndex)].widthMM
             return DisplayPlan(width: 960, height: 544, fps: 30, codec: .h264, iconWidthMM: icon)
         }
-        let cap = selectedResolution()
-        let portrait = UIDevice.current.userInterfaceIdiom == .pad && orientationControl.selectedSegmentIndex == 1
+        let cap = usesCustomSize ? customSize : selectedResolution()
+        let portrait = !usesCustomSize && UIDevice.current.userInterfaceIdiom == .pad && orientationControl.selectedSegmentIndex == 1
         var width = portrait ? cap.height : cap.width, height = portrait ? cap.width : cap.height
         var capArea = cap.width * cap.height
         if lightLevel >= 2 { capArea = min(capArea, 1280 * 720) }
@@ -814,7 +833,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
             scale = min(scale, 1920 / Double(width), 1080 / Double(height))
         }
         width = max(320, Int(Double(width) * scale) / 2 * 2); height = max(320, Int(Double(height) * scale) / 2 * 2)
-        if !followsCarScreen, let ratio = selectedAspectRatio {
+        if !usesCustomSize, !followsCarScreen, let ratio = selectedAspectRatio {
             (width, height) = ReceiverConfiguration.fixedDisplaySize(area: capArea, ratio: ratio,
                 maxWidth: outputMode == .browser ? 3840 : 1920,
                 maxHeight: outputMode == .browser ? 3840 : 1080)
@@ -1072,7 +1091,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
             config.oemIconLabel = String((nameField.text ?? "").prefix(12)).isEmpty ? "CarWithin" : String((nameField.text ?? "").prefix(12))
         }
         let source = outputMode != .browser ? headUnitOutput.selectedTitle
-            : followsCarScreen ? (screen.map { "车机屏幕 \($0.title)" } ?? "尚无车机屏幕，用固定分辨率") : "固定尺寸"
+            : followsCarScreen ? (screen.map { "车机屏幕 \($0.title)" } ?? "尚无车机屏幕，用固定分辨率") : sizeModeControl.selectedTitle
         log("画面计划：\(plan.width)×\(plan.height) @ \(plan.fps) FPS \(plan.codec.displayName)（\(source)\(lightLevel > 0 ? "，减轻档 \(lightLevel)" : "")）")
         config.browserAudio = soundOutput == .browser && config.videoOutputPort != nil && outputMode == .browser
         if outputMode == .airPlay, config.videoOutputPort != nil { config.airPlayStreamID = UUID() }
@@ -1118,6 +1137,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     }
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
         guard fullscreenContainer != nil, UIDevice.current.userInterfaceIdiom == .pad else { return .all }
+        if usesCustomSize { return customSize.height > customSize.width ? .portrait : .landscape }
         return orientationControl.selectedSegmentIndex == 1 ? .portrait : .landscape
     }
     @objc private func showFullscreen() {
@@ -1710,7 +1730,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         aspectRatioControl.isEnabled = value
         frameRateControl.isEnabled = value
         codecControl.isEnabled = value
-        [sizeModeControl, iconSizeControl, performanceControl].forEach { $0.isEnabled = value }
+        [sizeModeControl, carbitSizeModeControl, iconSizeControl, performanceControl].forEach { $0.isEnabled = value }
         [autoRestartSwitch, showTouchesSwitch, carButtonSwitch].forEach { $0.isEnabled = value }
         driveControl.isEnabled = value
         bluetoothSetupSwitch.isEnabled = value
@@ -1911,6 +1931,7 @@ extension ReceiverViewController {
             $0.title == defaults.string(forKey: "displayAspectRatio")
         }.map { $0 + 1 } ?? 0
         sizeModeControl.selectedSegmentIndex = defaults.object(forKey: "displaySizeMode") as? Int ?? 0
+        carbitSizeModeControl.selectedSegmentIndex = defaults.bool(forKey: "carbitCustomSizeEnabled") ? 1 : 0
         frameRateControl.selectedSegmentIndex = [0: 0, 30: 1, 60: 2][defaults.object(forKey: "displayMaxFPS") as? Int ?? 60] ?? 2
         codecControl.selectedSegmentIndex = ["auto": 0, "h264": 1, "h265": 2][defaults.string(forKey: "videoCodec") ?? "h264"] ?? 1
         let savedWidth = defaults.object(forKey: "widthPhysicalMM") as? Int ?? CarPlayInfo.defaultWidthPhysicalMM
@@ -1920,7 +1941,10 @@ extension ReceiverViewController {
         autoRestartSwitch.isOn = defaults.object(forKey: "autoRestart") as? Bool ?? false
         showTouchesSwitch.isOn = defaults.bool(forKey: "showTouches")
         carButtonSwitch.isOn = defaults.object(forKey: "carButton") as? Bool ?? true
-        let displayControls: [UIControl] = [resolutionControl, aspectRatioControl, sizeModeControl, frameRateControl, codecControl, iconSizeControl,
+        for menu in [sizeModeControl, carbitSizeModeControl] {
+            menu.addTarget(self, action: #selector(displaySizeModeChanged), for: .valueChanged)
+        }
+        let displayControls: [UIControl] = [resolutionControl, aspectRatioControl, frameRateControl, codecControl, iconSizeControl,
                                             performanceControl, autoRestartSwitch, showTouchesSwitch, carButtonSwitch]
         displayControls.forEach { $0.addTarget(self, action: #selector(displaySettingChanged), for: .valueChanged) }
         appearanceControl.selectedSegmentIndex = defaults.integer(forKey: "carPlayAppearance")
@@ -2223,6 +2247,7 @@ extension ReceiverViewController {
                 SettingsSection("连接与输出", connection),
                 SettingsSection("CarPlay", [
                     .page("画面", icon: ("rectangle.on.rectangle", .systemGreen), detail: { [unowned self] in
+                        if self.usesCustomSize { return "\(self.customSize.width)×\(self.customSize.height)" }
                         if self.outputMode == .carbit { return "按车机请求输出" }
                         return self.outputMode.requiresWiFiInterface ? "仪表固定尺寸" : self.followsCarScreen ? "跟随车机" : self.resolutionControl.selectedTitle.components(separatedBy: "（").first
                     }) { [unowned self] in self.displayPage() },
@@ -2257,18 +2282,80 @@ extension ReceiverViewController {
 
     // MARK: CarPlay 画面
 
+    @objc private func displaySizeModeChanged() {
+        guard !running, !waitingForNetwork else { return }
+        guard usesCustomSize else { displaySettingChanged(); return }
+        let carbit = outputMode == .carbit
+        let menu = carbit ? carbitSizeModeControl : sizeModeControl
+        let defaults = UserDefaults.standard
+        let previous = carbit ? (defaults.bool(forKey: "carbitCustomSizeEnabled") ? 1 : 0) : defaults.integer(forKey: "displaySizeMode")
+        editCustomSize { menu.selectedSegmentIndex = previous }
+    }
+
+    private func customSizeRow() -> SettingsRow {
+        let size = customSize
+        let value = "\(size.width) × \(size.height)"
+        if running || waitingForNetwork { return .info("宽 × 高（像素）", value) }
+        return .action("宽 × 高（像素）", detail: { value }) { [weak self] in self?.editCustomSize() }
+    }
+
+    private func editCustomSize(onCancel: (() -> Void)? = nil) {
+        guard usesCustomSize, !running, !waitingForNetwork, let navigation = settingsNavigation else { return }
+        let limits = outputMode == .browser
+            ? "宽、高均为 320–3840 的偶数，总像素不超过 3840 × 2160。"
+            : "宽为 320–1920 的偶数，高为 320–1080 的偶数。"
+        let editor = UIAlertController(title: "自定义尺寸", message: limits, preferredStyle: .alert)
+        let size = customSize
+        for (title, value) in [("宽", size.width), ("高", size.height)] {
+            editor.addTextField { field in
+                let label = UILabel()
+                label.text = " \(title)  "
+                label.sizeToFit()
+                field.leftView = label
+                field.leftViewMode = .always
+                field.accessibilityLabel = "\(title)（像素）"
+                field.keyboardType = .numberPad
+                field.text = String(value)
+                field.clearButtonMode = .whileEditing
+            }
+        }
+        func pixels(in editor: UIAlertController?) -> [Int]? {
+            guard let fields = editor?.textFields,
+                  let w = Int(fields[0].text ?? ""), let h = Int(fields[1].text ?? ""),
+                  acceptsCustomSize(width: w, height: h) else { return nil }
+            return [w, h]
+        }
+        editor.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in onCancel?() })
+        let save = UIAlertAction(title: "保存", style: .default) { [weak editor] _ in
+            guard let pair = pixels(in: editor) else { return }
+            UserDefaults.standard.set(pair, forKey: self.customSizeKey)
+            self.displaySettingChanged()
+        }
+        editor.addAction(save)
+        for field in editor.textFields ?? [] {
+            field.addAction(UIAction { [weak editor, weak save] _ in
+                save?.isEnabled = pixels(in: editor) != nil
+            }, for: .editingChanged)
+        }
+        navigation.present(editor, animated: true)
+    }
+
     fileprivate func displayPage() -> SettingsPageController {
         page("画面") { [unowned self] in
             if outputMode == .carbit {
+                var rows: [SettingsRow] = [.control("画面尺寸", icon: ("aspectratio.fill", .systemGreen), carbitSizeModeControl)]
+                if usesCustomSize {
+                    rows.append(customSizeRow())
+                } else {
+                    rows.append(.control("分辨率", icon: ("display", .systemGreen), resolutionControl))
+                    rows.append(.control("画面比例", icon: ("aspectratio", .systemGreen), aspectRatioControl))
+                }
+                rows.append(.control("CarPlay 图标大小", icon: ("square.grid.2x2.fill", .systemPurple), iconSizeControl))
                 return [
                     SettingsSection("亿连画面", footer: "按车机请求的尺寸等比缩放 CarPlay 画面，宽高比不同时保留黑边。", [
                         .info("车机视频", "H.264 · 最高 1920×1080 · 30 FPS")
                     ]),
-                    SettingsSection("本机 CarPlay", [
-                        .control("分辨率", icon: ("display", .systemGreen), resolutionControl),
-                        .control("画面比例", icon: ("aspectratio", .systemGreen), aspectRatioControl),
-                        .control("CarPlay 图标大小", icon: ("square.grid.2x2.fill", .systemPurple), iconSizeControl)
-                    ])
+                    SettingsSection("本机 CarPlay", rows)
                 ]
             }
             if outputMode == .zeeho {
@@ -2300,19 +2387,23 @@ extension ReceiverViewController {
                     self.targetScreen?.title ?? "尚未记录"
                 }) { [unowned self] in self.screensPage() })
             }
-            size.append(.control(followsCarScreen ? "最高分辨率" : "分辨率", icon: ("arrow.up.left.and.arrow.down.right", .systemGreen), resolutionControl))
-            if !followsCarScreen {
-                size.append(.control("画面比例", icon: ("aspectratio", .systemGreen), aspectRatioControl))
+            if usesCustomSize {
+                size.append(customSizeRow())
+            } else {
+                size.append(.control(followsCarScreen ? "最高分辨率" : "分辨率", icon: ("arrow.up.left.and.arrow.down.right", .systemGreen), resolutionControl))
+                if !followsCarScreen {
+                    size.append(.control("画面比例", icon: ("aspectratio", .systemGreen), aspectRatioControl))
+                }
             }
-            if UIDevice.current.userInterfaceIdiom == .pad, modeControl.selectedSegmentIndex != 2 {
+            if !usesCustomSize, UIDevice.current.userInterfaceIdiom == .pad, modeControl.selectedSegmentIndex != 2 {
                 size.append(.control("CarPlay 方向", icon: ("rotate.right.fill", .systemGreen), orientationControl))
             }
             let plan = planDisplay(for: targetScreen)
             return [
-                SettingsSection(footer: (followsCarScreen
+                SettingsSection(footer: (usesCustomSize ? "按输入的宽和高启动 CarPlay。" : followsCarScreen
                     ? "启动时先用勾选的屏幕或最近一次设置。第一个网页接管后，窗口尺寸变化会在 CarWithin 回到前台时应用。更大的窗口按最高分辨率等比缩小。"
                     : "选择比例后按分辨率档位计算尺寸，短边至少 320 像素，实际值见下方。2K/4K 会增加发热和带宽。")
-                    + (!followsCarScreen && outputMode != .browser ? "\n此输出受 1920×1080 限制，较长的竖屏比例以实际尺寸为准。" : "")
+                    + (!usesCustomSize && !followsCarScreen && outputMode != .browser ? "\n此输出受 1920×1080 限制，较长的竖屏比例以实际尺寸为准。" : "")
                     + "\n下次启动：\(plan.width)×\(plan.height) · \(plan.fps) FPS · \(plan.codec.displayName)", size),
                 SettingsSection(footer: "自动帧率根据主网页选择 30 或 60 FPS。支持 H.265 的主网页会优先使用 H.265。", [
                     .control("视频编码", icon: ("film.fill", .systemGreen), codecControl),
