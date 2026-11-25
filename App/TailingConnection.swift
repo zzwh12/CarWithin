@@ -332,6 +332,18 @@ final class TailingConnection: @unchecked Sendable {
                     log(CWL("{1}已确认 PXC 通知 {2}（{3} 字节）", [profile.name, exchange, String(request.payload.count)]))
                     continue
                 }
+                if profile == .carbit {
+                    // 蒙迪欧亿连握手会推送多组功能通知；未知请求按空回执确认并记日志，
+                    // 未知回应直接忽略，均不中断会话，避免逐一枚举车机私有命令。
+                    let code = String(format: "0x%08x", request.command)
+                    if request.command & 1 == 0 {
+                        try socket.write(TailingProtocol.control(request.command &+ 1, identifier: request.identifier))
+                        log(CWL("{1}已按空回执确认未知通知 {2}", [profile.name, code]))
+                    } else {
+                        log(CWL("{1}忽略未知回应 {2}", [profile.name, code]))
+                    }
+                    continue
+                }
                 throw TailingError.protocolFailure(String(format: CWL("未支持的协商命令 0x%08x"), request.command))
             }
             try replyControl(socket, request, payload: payload)

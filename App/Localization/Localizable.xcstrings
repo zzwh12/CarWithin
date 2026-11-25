@@ -18977,6 +18977,40 @@
         }
       }
     },
+    "{1}已按空回执确认未知通知 {2}": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "{1} acknowledged unknown notification {2} with an empty receipt"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "{1}已按空回执确认未知通知 {2}"
+          }
+        }
+      }
+    },
+    "{1}忽略未知回应 {2}": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "{1} ignored unknown reply {2}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "{1}忽略未知回应 {2}"
+          }
+        }
+      }
+    },
     "PXC 会话已关闭": {
       "extractionState": "manual",
       "localizations": {

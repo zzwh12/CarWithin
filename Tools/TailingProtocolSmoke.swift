@@ -59,7 +59,7 @@ struct TailingTests {
                                 reported: .init(width: 3840, height: 1200), expected: .init(width: 1920, height: 600))
         try rejectedInstrument()
         try rejectedInstrument(profile: .carbit)
-        print("PASS: Carbit QR parsing, consecutive 0x103a0/0x10020 receipts on both control sockets, H.264 frames, display resize and mirroring capability checks")
+        print("PASS: Carbit QR parsing, consecutive 0x103a0/0x10020/0x10430 receipts and unknown-command tolerance on both control sockets, H.264 frames, display resize and mirroring capability checks")
         try cancelledHandshake()
         print("PASS: 台铃拆包/合包、长度校验、RSA2048/type1、TCP取消、模拟仪表握手/逐帧拉取/保活/重启、错误型号拒绝、协商中停止")
     }
@@ -166,11 +166,14 @@ struct TailingTests {
 
     private static func checkCarbitNotifications(on socket: TailingSocket, firstIdentifier: UInt32) throws {
         let featuresIdentifier = firstIdentifier + 1
+        let extendedIdentifier = firstIdentifier + 2
         let ftpInfo = try TailingProtocol.control(0x103a0, identifier: firstIdentifier,
             payload: TailingProtocol.json(["port": 21000]))
         let mediaFeatures = try TailingProtocol.control(0x10020, identifier: featuresIdentifier,
             payload: TailingProtocol.json(["music": true, "tts": false, "vr": false]))
-        try socket.write(ftpInfo + mediaFeatures)
+        let extended = try TailingProtocol.control(0x10430, identifier: extendedIdentifier,
+            payload: TailingProtocol.json(["feature": 1]))
+        try socket.write(ftpInfo + mediaFeatures + extended)
 
         let ftpReceipt = try TailingProtocol.readControl { try socket.readExactly($0) }
         try expect(ftpReceipt == .init(command: 0x103a1, identifier: firstIdentifier, payload: Data()),
@@ -178,6 +181,16 @@ struct TailingTests {
         let featuresReceipt = try TailingProtocol.readControl { try socket.readExactly($0) }
         try expect(featuresReceipt == .init(command: 0x10021, identifier: featuresIdentifier, payload: Data()),
                    "亿连 0x10020 应收到带原请求编号的空回执")
+        let extendedReceipt = try TailingProtocol.readControl { try socket.readExactly($0) }
+        try expect(extendedReceipt == .init(command: 0x10431, identifier: extendedIdentifier, payload: Data()),
+                   "亿连 0x10430 应收到带原请求编号的空回执")
+        // 未知请求按空回执确认，未知回应忽略不回，均不得中断会话。
+        let unknownReply = try TailingProtocol.control(0x10553, identifier: firstIdentifier + 3)
+        let unknownNotice = try TailingProtocol.control(0x10550, identifier: firstIdentifier + 4)
+        try socket.write(unknownReply + unknownNotice)
+        let unknownReceipt = try TailingProtocol.readControl { try socket.readExactly($0) }
+        try expect(unknownReceipt == .init(command: 0x10551, identifier: firstIdentifier + 4, payload: Data()),
+                   "亿连未知通知应按空回执确认，未知回应不得回执")
     }
 
     private static func simulatedInstrument(identity: TailingIdentity, idleControlFrames: Int = 0,

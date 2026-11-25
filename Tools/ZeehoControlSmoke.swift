@@ -34,6 +34,17 @@ struct ZeehoControlSmoke {
                 precondition(repeatedReply == nil)
             }
         }
+        let carbitOnly = TailingProtocol.Control(command: 0x10430, identifier: 0xa0000100,
+                                                payload: Data("synthetic notification".utf8))
+        guard let extended = try TailingProtocol.notificationReceipt(to: carbitOnly, profile: .carbit) else {
+            fatalError("Expected Carbit 0x10430 notification acknowledgement")
+        }
+        precondition(extended.count == 16 && extended.uint32LE(0) == 0x10431 && extended.uint32LE(12) == carbitOnly.identifier)
+        let sePlusExcluded = try TailingProtocol.notificationReceipt(to: carbitOnly, profile: .zeehoSEPlus)
+        precondition(sePlusExcluded == nil)
+        let repeatedReceipt = try TailingProtocol.notificationReceipt(to: TailingProtocol.Control(command: 0x10431, identifier: 1, payload: Data()),
+                                                                      profile: .carbit)
+        precondition(repeatedReceipt == nil)
         for command: UInt32 in [0x103b1, 0x103b2, 0x10600, 0x10450, 0x10790, 0x20000, 0x70000000, 0x80000010, 0xfffffff0] {
             let request = TailingProtocol.Control(command: command, identifier: 1, payload: Data())
             for profile: TailingDisplayProfile in [.zeehoSEPlus, .carbit] {
@@ -42,6 +53,6 @@ struct ZeehoControlSmoke {
             }
         }
         precondition(TailingError.protocolFailure("test").localizedDescription.contains("PXC"))
-        print("PASS: Carbit 0x103a0/0x10020 and five SE+ notification receipts, profile isolation, identifiers, empty payloads and reply-loop exclusion")
+        print("PASS: Carbit 0x103a0/0x10020/0x10430 and five SE+ notification receipts, profile isolation, identifiers, empty payloads and reply-loop exclusion")
     }
 }

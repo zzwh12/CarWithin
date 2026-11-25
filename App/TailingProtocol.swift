@@ -42,6 +42,7 @@ enum TailingProtocol {
         switch (profile, request.command) {
         case (.carbit, 0x10020), (.zeehoSEPlus, 0x10020), // Media feature configuration
              (.carbit, 0x103a0), (.zeehoSEPlus, 0x103a0), // FTP info notification
+             (.carbit, 0x10430), // Mondeo extended feature notification, body semantics unknown
              (.zeehoSEPlus, 0x103b0), (.zeehoSEPlus, 0x10470),
              (.zeehoSEPlus, 0x104a0):
             return try control(request.command + 1, identifier: request.identifier)
