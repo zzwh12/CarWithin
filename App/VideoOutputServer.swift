@@ -17,7 +17,7 @@ struct BrowserDisplay: Equatable {
 /// Browser page options chosen on the iPhone.
 enum BrowserPerformance: String, CaseIterable {
     case auto, quality, speed
-    var title: String { switch self { case .auto: "自动"; case .quality: "质量优先"; case .speed: "速度优先" } }
+    var title: String { switch self { case .auto: CWL("自动"); case .quality: CWL("质量优先"); case .speed: CWL("速度优先") } }
 }
 
 /// Serves a browser-based CarPlay view over HTTP and WebSocket to several LAN devices at once.
@@ -53,7 +53,7 @@ final class VideoOutputServer {
         let secure: Bool
         init(connection: NWConnection, secure: Bool) {
             self.connection = connection; self.secure = secure
-            if case .hostPort(let host, _) = connection.endpoint { peer = "\(host)" } else { peer = "未知设备" }
+            if case .hostPort(let host, _) = connection.endpoint { peer = "\(host)" } else { peer = CWL("未知设备") }
         }
     }
     /// One cached access unit; `arrivalUs` is when CarWithin received it (monotonic µs).
@@ -108,6 +108,10 @@ final class VideoOutputServer {
     private var showTouches = false
     private var browserAudio = false
     private var hls: CarPlayHLS?
+    private var hlsKeyframeTimer: DispatchSourceTimer?
+    #if DEBUG
+    private var airPlayRequestDiagnostics = Set<String>()
+    #endif
     var onAirPlayReady: ((UUID) -> Void)?
 
     private var viewerCount: Int { clients.values.filter { $0.mode != .request }.count }
@@ -115,11 +119,12 @@ final class VideoOutputServer {
 
     func start(port: UInt16, securePort: UInt16? = nil, width: Int, height: Int, fps: Int,
                performance: BrowserPerformance = .auto, showTouches: Bool = false, preferredViewer: UUID? = nil,
-               browserAudio: Bool = false, airPlayStreamID: UUID? = nil) {
+               browserAudio: Bool = false, airPlayStreamID: UUID? = nil, airPlayAddress: String? = nil) {
         queue.async { [weak self] in
             self?.performance = performance; self?.showTouches = showTouches
             self?.startOnQueue(port: port, securePort: securePort, width: width, height: height, fps: fps,
-                               preferredViewer: preferredViewer, browserAudio: browserAudio, airPlayStreamID: airPlayStreamID)
+                               preferredViewer: preferredViewer, browserAudio: browserAudio, airPlayStreamID: airPlayStreamID,
+                               airPlayAddress: airPlayAddress)
         }
     }
 
@@ -164,10 +169,21 @@ final class VideoOutputServer {
     // MARK: Listener
 
     private func startOnQueue(port: UInt16, securePort: UInt16?, width: Int, height: Int, fps: Int, preferredViewer: UUID?,
-                              browserAudio: Bool, airPlayStreamID: UUID?) {
+                              browserAudio: Bool, airPlayStreamID: UUID?, airPlayAddress: String?) {
         stopOnQueue()
         self.browserAudio = browserAudio
-        if let airPlayStreamID { hls = CarPlayHLS(id: airPlayStreamID) }
+        if let airPlayStreamID, let airPlayAddress {
+            hls = CarPlayHLS(id: airPlayStreamID, origin: "http://\(airPlayAddress):\(port)")
+            // A static CarPlay screen may stop emitting frames. Requests must not depend
+            // on append(), otherwise the live playlist can never advance again.
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now() + 1, repeating: 1)
+            timer.setEventHandler { [weak self] in
+                guard let self, self.hls != nil else { return }
+                self.onKeyframeRequest?(CWL("AirPlay 分段"))
+            }
+            timer.resume(); hlsKeyframeTimer = timer
+        }
         self.width = width; self.height = height; self.fps = fps
         let run = generation
         returningViewer = preferredViewer
@@ -187,11 +203,11 @@ final class VideoOutputServer {
         do {
             let addresses = ReceiverConfiguration.localIPv4Addresses()
             let tlsIdentity = try LocalTLSIdentity.load(addresses: addresses)
-            onLog?("\(tlsIdentity.created ? "已生成" : "已载入")浏览器 HTTPS 证书（\(addresses.joined(separator: ", "))）")
-            if !tlsIdentity.rootDER.isEmpty { onLog?("HTTPS 根证书 SHA-256：\(LocalTLSIdentity.fingerprint(tlsIdentity.rootDER))") }
+            onLog?(CWL("{1}浏览器 HTTPS 证书（{2}）", [String(describing: tlsIdentity.created ? CWL("已生成") : CWL("已载入")), String(describing: addresses.joined(separator: ", "))]))
+            if !tlsIdentity.rootDER.isEmpty { onLog?(CWL("HTTPS 根证书 SHA-256：{1}", [String(describing: LocalTLSIdentity.fingerprint(tlsIdentity.rootDER))])) }
             let nativeIdentity = tlsIdentity.chain.isEmpty ? sec_identity_create(tlsIdentity.identity)
                 : sec_identity_create_with_certificates(tlsIdentity.identity, tlsIdentity.chain as CFArray)
-            guard let identity = nativeIdentity else { throw LocalTLSIdentity.TLSIdentityError.certificate("无法使用证书") }
+            guard let identity = nativeIdentity else { throw LocalTLSIdentity.TLSIdentityError.certificate(CWL("无法使用证书")) }
             let tls = NWProtocolTLS.Options()
             sec_protocol_options_set_local_identity(tls.securityProtocolOptions, identity)
             sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
@@ -201,21 +217,21 @@ final class VideoOutputServer {
             self.securePort = securePort
             httpsRoot = tlsIdentity.rootDER
             secureListener = makeListener(port: securePort, parameters: parameters, secure: true, run: run)
-        } catch { report("低延迟 HTTPS 接收页未开启：\(error.localizedDescription)") }
+        } catch { report(CWL("低延迟 HTTPS 接收页未开启：{1}", [String(describing: error.localizedDescription)])) }
     }
 
     private func makeListener(port: UInt16, parameters: NWParameters, secure: Bool, run: UUID) -> NWListener? {
-        let name = hls == nil ? (secure ? "低延迟 HTTPS 接收页" : "浏览器接收页") : "AirPlay 播放服务"
-        guard let endpointPort = NWEndpoint.Port(rawValue: port) else { report("\(name)端口无效"); return nil }
+        let name = hls == nil ? (secure ? CWL("低延迟 HTTPS 接收页") : CWL("浏览器接收页")) : CWL("AirPlay 播放服务")
+        guard let endpointPort = NWEndpoint.Port(rawValue: port) else { report(CWL("{1}端口无效", [String(describing: name)])); return nil }
         do {
             let candidate = try NWListener(using: parameters, on: endpointPort)
             candidate.stateUpdateHandler = { [weak self, weak candidate] state in
                 guard let self, let candidate, self.generation == run,
                       self.listener === candidate || self.secureListener === candidate else { return }
                 switch state {
-                case .ready: self.report("\(name)已开启，端口 \(port)")
+                case .ready: self.report(CWL("{1}已开启，端口 {2}", [String(describing: name), String(describing: port)]))
                 case .failed(let error):
-                    self.report("\(name)启动失败：\(error.localizedDescription)")
+                    self.report(CWL("{1}启动失败：{2}", [String(describing: name), String(describing: error.localizedDescription)]))
                     candidate.cancel()
                     if secure { self.secureListener = nil; self.securePort = nil; self.httpsRoot = nil } else { self.listener = nil }
                 default: break
@@ -228,14 +244,14 @@ final class VideoOutputServer {
             }
             candidate.start(queue: queue)
             return candidate
-        } catch { report("\(name)启动失败：\(error.localizedDescription)"); return nil }
+        } catch { report(CWL("{1}启动失败：{2}", [String(describing: name), String(describing: error.localizedDescription)])); return nil }
     }
 
     private func accept(_ connection: NWConnection, secure: Bool) {
         guard clients.count < maximumConnections else {
             connection.start(queue: queue)
             sendHTTP(status: "503 Service Unavailable", contentType: "text/plain; charset=utf-8",
-                     body: Data("连接数过多，请稍后再试".utf8), to: connection) { connection.cancel() }
+                     body: Data(CWL("连接数过多，请稍后再试").utf8), to: connection) { connection.cancel() }
             return
         }
         let candidate = Client(connection: connection, secure: secure)
@@ -279,8 +295,14 @@ final class VideoOutputServer {
         let headerText = String(decoding: client.buffer.prefix(upTo: end), as: UTF8.self)
         let lines = headerText.components(separatedBy: "\r\n")
         let request = lines.first?.split(separator: " ") ?? []
-        guard request.count == 3, request[0] == "GET" else { reject(client, status: "405 Method Not Allowed"); return }
+        guard request.count == 3 else { reject(client, status: "405 Method Not Allowed"); return }
         let path = String(request[1]).split(separator: "?", maxSplits: 1).first.map(String.init) ?? "/"
+        guard request[0] == "GET" else {
+            #if DEBUG
+            logAirPlayRequest(from: client.peer, method: String(request[0]), path: path, status: 405)
+            #endif
+            reject(client, status: "405 Method Not Allowed"); return
+        }
         var headers: [String: String] = [:]
         for line in lines.dropFirst() {
             guard let colon = line.firstIndex(of: ":") else { continue }
@@ -288,7 +310,11 @@ final class VideoOutputServer {
         }
         client.buffer.removeAll(keepingCapacity: false)
         if let hls {
-            guard let resource = hls.resource(at: path) else { reject(client, status: "404 Not Found"); return }
+            let resource = hls.resource(at: path)
+            #if DEBUG
+            logAirPlayRequest(from: client.peer, method: "GET", path: path, status: resource == nil ? 404 : 200)
+            #endif
+            guard let resource else { reject(client, status: "404 Not Found"); return }
             sendHTTP(status: "200 OK", contentType: resource.type, body: resource.body, to: client.connection) { [weak self, weak client] in
                 guard let self, let client else { return }
                 self.close(client, reason: nil)
@@ -307,7 +333,7 @@ final class VideoOutputServer {
             client.mode = .raw; client.waitingForIDR = true
             let type = parameters.codec == .h264 ? "video/h264" : "video/h265"
             sendRaw("HTTP/1.1 200 OK\r\nContent-Type: \(type)\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n", to: client)
-            report("\(client.peer) 已连接原始视频流（共 \(viewerCount) 台）")
+            report(CWL("{1} 已连接原始视频流（共 {2} 台）", [String(describing: client.peer), String(describing: viewerCount)]))
             replayGOP(to: client)
         case "/stream", "/oxp/v0":
             guard viewerCount < Self.maximumViewers else { reject(client, status: "503 Service Unavailable"); return }
@@ -321,7 +347,7 @@ final class VideoOutputServer {
         guard let root = httpsRoot, let port = securePort else { reject(client, status: "404 Not Found"); return }
         if root.isEmpty {
             guard path == "/https-setup", let domain = HTTPSConfiguration.normalizedDomain(HTTPSConfiguration.domain) else { reject(client, status: "404 Not Found"); return }
-            sendHTTP(status: "200 OK", contentType: "text/html; charset=utf-8", body: Data("<meta charset=utf-8><h1>HTTPS 已配置证书</h1><p>使用公开 CA 证书时无需安装本地根证书。</p><a href=\"https://\(domain):\(port)/\">打开 HTTPS 接收页</a>".utf8), to: client.connection) { [weak self, weak client] in
+            sendHTTP(status: "200 OK", contentType: "text/html; charset=utf-8", body: Data(CWL("<meta charset=utf-8><h1>HTTPS 已配置证书</h1><p>使用公开 CA 证书时无需安装本地根证书。</p><a href=\"https://{1}:{2}/\">打开 HTTPS 接收页</a>", [String(describing: domain), String(describing: port)]).utf8), to: client.connection) { [weak self, weak client] in
                 guard let self, let client else { return }; self.close(client, reason: nil)
             }
             return
@@ -365,13 +391,13 @@ final class VideoOutputServer {
         sendJSON(["type": "hello", "page": BrowserReceiverPage.version, "securePort": Int(securePort ?? 0),
                   "controls": CarPlayControl.allCases.map(\.rawValue),
                   "perf": performance.rawValue, "showTouches": showTouches, "audio": browserAudio], to: client)
-        report("\(client.peer) 已连接浏览器\(client.secure ? "（HTTPS）" : "")（共 \(viewerCount) 台）")
+        report(CWL("{1} 已连接浏览器{2}（共 {3} 台）", [String(describing: client.peer), String(describing: client.secure ? "（HTTPS）" : ""), String(describing: viewerCount)]))
     }
 
     // MARK: WebSocket input
 
     private func handleWebSocketInput(_ client: Client) {
-        guard client.buffer.count <= maximumInputBytes else { close(client, reason: "\(client.peer) 输入过大，已断开"); return }
+        guard client.buffer.count <= maximumInputBytes else { close(client, reason: CWL("{1} 输入过大，已断开", [String(describing: client.peer)])); return }
         do {
             while let frame = try takeWebSocketFrame(from: &client.buffer) {
                 switch frame.opcode {
@@ -382,7 +408,7 @@ final class VideoOutputServer {
                 default: throw WebSocketError.unsupportedFrame
                 }
             }
-        } catch { close(client, reason: "\(client.peer) 协议错误：\(error.localizedDescription)") }
+        } catch { close(client, reason: CWL("{1} 协议错误：{2}", [String(describing: client.peer), String(describing: error.localizedDescription)])) }
     }
 
     private func handleText(_ text: String, client: Client) throws {
@@ -395,23 +421,23 @@ final class VideoOutputServer {
             client.browserReady = true; client.waitingForIDR = true; client.streamStarted = false; client.skippingToIDR = false
             let webCodecs = object["decoder"] as? String == "webcodecs"
             if webCodecs != client.webCodecs || !client.streamStarted {
-                onLog?("\(client.peer) 使用\(webCodecs ? " WebCodecs 低延迟" : " MSE 兼容")解码")
+                onLog?(CWL("{1} 使用{2}解码", [String(describing: client.peer), String(describing: webCodecs ? CWL(" WebCodecs 低延迟") : CWL(" MSE 兼容"))]))
             }
             client.webCodecs = webCodecs
             client.usesAudioClock = browserAudio && object["audioClock"] as? Bool == true
-            sendJSON(["type": "status", "text": "已连接 CarWithin，正在等待关键帧"], to: client)
+            sendJSON(["type": "status", "text": CWL("已连接 CarWithin，正在等待关键帧")], to: client)
             replayGOP(to: client)
         case "audio":
             client.wantsAudio = client.usesAudioClock && object["enabled"] as? Bool == true
         case "keyframe":
             // Browser decoder recovery (stall, decode error, buffer trim). The receiver throttles.
-            let reason = (object["reason"] as? String).map { String($0.prefix(60)) } ?? "浏览器请求"
+            let reason = (object["reason"] as? String).map { String($0.prefix(60)) } ?? CWL("浏览器请求")
             onKeyframeRequest?("\(client.peer)：\(reason)")
         case "error", "info":
             // Browser-side diagnostics land in the iPhone log; capped so a page cannot flood it.
             guard client.reportedMessages < 40, let text = object["text"] as? String else { break }
             client.reportedMessages += 1
-            onLog?("浏览器 \(client.peer) \(type == "error" ? "错误" : "信息")：\(text.prefix(300))")
+            onLog?(CWL("浏览器 {1} {2}：{3}", [String(describing: client.peer), String(describing: type == "error" ? CWL("错误") : CWL("信息")), String(describing: text.prefix(300))]))
         case "touches":
             // Every finger this viewer currently holds; fingers missing from the list are released.
             guard let list = object["points"] as? [[String: Any]], list.count <= 10 else { throw WebSocketError.invalidTouch }
@@ -442,13 +468,13 @@ final class VideoOutputServer {
                 refreshHz: min(max(int("hz") ?? 0, 0), 240),
                 supportsH265: object["h265"] as? Bool ?? false, fullscreen: object["fullscreen"] as? Bool ?? false,
                 peer: client.peer)
-            onLog?("\(client.peer) 屏幕 \(width)×\(height)（像素比 \(display.devicePixelRatio)，\(display.refreshHz) Hz，H.265 \(display.supportsH265 ? "可" : "不可")硬解\(display.fullscreen ? "，全屏" : "")）")
+            onLog?(CWL("{1} 屏幕 {2}×{3}（像素比 {4}，{5} Hz，H.265 {6}硬解{7}）", [String(describing: client.peer), String(describing: width), String(describing: height), String(describing: display.devicePixelRatio), String(describing: display.refreshHz), String(describing: display.supportsH265 ? CWL("可") : CWL("不可")), String(describing: display.fullscreen ? CWL("，全屏") : "")]))
             client.display = display
             client.awaitingDisplay = false
             updatePrimaryDisplay(changed: client.id)
         case "struggling":
             guard client.id == primaryBrowser else { break }
-            let reason = (object["reason"] as? String).map { String($0.prefix(40)) } ?? "卡顿"
+            let reason = (object["reason"] as? String).map { String($0.prefix(40)) } ?? CWL("卡顿")
             let decoder = object["decoder"] as? String == "webcodecs" ? "WebCodecs" : "MSE"
             onStruggling?(client.peer, "\(decoder) \(reason)")
         case "ping":
@@ -467,8 +493,8 @@ final class VideoOutputServer {
         guard accessUnit.count <= 8 * 1024 * 1024 else { return }
         let units: [Data]
         do { units = try AnnexB.units(in: accessUnit) }
-        catch { onLog?("浏览器输出忽略了无效视频数据：\(error.localizedDescription)"); return }
-        if parameters.codec != codec { resetStream(codec: codec, reason: "视频编码已切换为 \(codec.displayName)") }
+        catch { onLog?(CWL("浏览器输出忽略了无效视频数据：{1}", [String(describing: error.localizedDescription)])); return }
+        if parameters.codec != codec { resetStream(codec: codec, reason: CWL("视频编码已切换为 {1}", [String(describing: codec.displayName)])) }
         var picture: [Data] = []
         var changed = false
         var keyframe = false
@@ -482,22 +508,22 @@ final class VideoOutputServer {
             do {
                 format = try FragmentedMP4.format(parameters: parameters, width: width, height: height, fps: fps)
                 decoderRecord = try parameters.decoderConfigurationRecord()
-            } catch { onLog?("浏览器视频格式生成失败：\(error.localizedDescription)"); format = nil; decoderRecord = nil }
+            } catch { onLog?(CWL("浏览器视频格式生成失败：{1}", [String(describing: error.localizedDescription)])); format = nil; decoderRecord = nil }
             gop.removeAll(); gopBytes = 0
             if previous != nil {
                 for client in clients.values where client.streamStarted { close(client, reason: nil) }
             }
-            if let format { onLog?("浏览器视频格式：\(format.codecString)（\(parameters.summary)）") }
+            if let format { onLog?(CWL("浏览器视频格式：{1}（{2}）", [String(describing: format.codecString), String(describing: parameters.summary)])) }
         }
         guard !picture.isEmpty else { return }
         let sample: Data
         do { sample = try AnnexB.lengthPrefixed(picture) }
-        catch { onLog?("视频帧转换失败：\(error.localizedDescription)"); return }
+        catch { onLog?(CWL("视频帧转换失败：{1}", [String(describing: error.localizedDescription)])); return }
         let annexB = picture.reduce(into: Data()) { $0.append(contentsOf: [0, 0, 0, 1]); $0.append($1) }
         if let hls, let format {
             let event = hls.append(sample: sample, keyframe: keyframe, format: format, arrivalUs: Self.nowUs())
             if event == .ready { onAirPlayReady?(hls.id) }
-            if event == .keyframeNeeded { onKeyframeRequest?("AirPlay 分段") }
+            if event == .keyframeNeeded { onKeyframeRequest?(CWL("AirPlay 分段")) }
             return
         }
         let frame = Frame(annexB: annexB, sample: sample, keyframe: keyframe, arrivalUs: Self.nowUs())
@@ -529,13 +555,13 @@ final class VideoOutputServer {
             return
         }
         // CarPlay sends a keyframe only at stream start, so a late viewer must ask for one.
-        onKeyframeRequest?("\(client.peer) 新连接")
+        onKeyframeRequest?(CWL("{1} 新连接", [String(describing: client.peer)]))
         let run = generation
         queue.asyncAfter(deadline: .now() + 2.5) { [weak self, weak client] in
             // Fallback if the iPhone ignores forceKeyFrame: start from the cached GOP anyway.
             guard let self, let client, self.generation == run, self.clients[client.id] != nil,
                   client.waitingForIDR, !self.gop.isEmpty else { return }
-            self.onLog?("\(client.peer) 未等到新关键帧，改用缓存画面（\(self.gop.count) 帧）")
+            self.onLog?(CWL("{1} 未等到新关键帧，改用缓存画面（{2} 帧）", [String(describing: client.peer), String(describing: self.gop.count)]))
             for item in self.gop { self.deliver(item, to: client) }
         }
     }
@@ -561,9 +587,9 @@ final class VideoOutputServer {
                 // Never drop a single dependent frame: skip the rest of this GOP and ask for an IDR.
                 client.skippingToIDR = true; client.gaps += 1
                 if client.gaps == 1 || client.gaps % 10 == 0 {
-                    onLog?("\(client.peer) 网络跟不上，跳到下一个关键帧（第 \(client.gaps) 次）")
+                    onLog?(CWL("{1} 网络跟不上，跳到下一个关键帧（第 {2} 次）", [String(describing: client.peer), String(describing: client.gaps)]))
                 }
-                onKeyframeRequest?("\(client.peer) 网络积压")
+                onKeyframeRequest?(CWL("{1} 网络积压", [String(describing: client.peer)]))
                 return
             }
         }
@@ -590,7 +616,7 @@ final class VideoOutputServer {
                 if !client.webCodecs {
                     sendWebSocket(Data([BrowserPacket.initialization.rawValue]) + format.initializationSegment, opcode: 2, to: client)
                 }
-                report("\(client.peer) 已开始显示 CarPlay（\(parameters.codec.displayName)\(client.webCodecs ? "，低延迟" : "")）")
+                report(CWL("{1} 已开始显示 CarPlay（{2}{3}）", [String(describing: client.peer), String(describing: parameters.codec.displayName), String(describing: client.webCodecs ? CWL("，低延迟") : "")]))
             }
             if client.webCodecs {
                 var packet = Data([keyframe ? BrowserPacket.keyframe.rawValue : BrowserPacket.delta.rawValue])
@@ -639,7 +665,7 @@ final class VideoOutputServer {
     private func send(_ data: Data, to client: Client) {
         guard clients[client.id] != nil else { return }
         guard client.pendingBytes + data.count <= maximumPendingBytes else {
-            close(client, reason: "\(client.peer) 读取过慢，已断开"); return
+            close(client, reason: CWL("{1} 读取过慢，已断开", [String(describing: client.peer)])); return
         }
         client.pendingBytes += data.count
         client.connection.send(content: data, completion: .contentProcessed { [weak self, weak client] error in
@@ -652,7 +678,7 @@ final class VideoOutputServer {
     private func sendRaw(_ text: String, to client: Client) { send(Data(text.utf8), to: client) }
 
     private func reject(_ client: Client, status: String) {
-        let body = status.hasPrefix("503") ? "最多支持 \(Self.maximumViewers) 台设备同时观看" : "请求不受支持"
+        let body = status.hasPrefix("503") ? CWL("最多支持 {1} 台设备同时观看", [String(describing: Self.maximumViewers)]) : CWL("请求不受支持")
         sendHTTP(status: status, contentType: "text/plain; charset=utf-8", body: Data(body.utf8), to: client.connection) { [weak self, weak client] in
             guard let self, let client else { return }; self.close(client, reason: nil)
         }
@@ -686,7 +712,7 @@ final class VideoOutputServer {
         let previous = primaryBrowser
         primaryBrowser = selected?.id
         guard force || previous != primaryBrowser || (changed != nil && changed == primaryBrowser) else { return }
-        if previous != primaryBrowser, let selected { onLog?("主接收屏幕：\(selected.peer)") }
+        if previous != primaryBrowser, let selected { onLog?(CWL("主接收屏幕：{1}", [String(describing: selected.peer)])) }
         onDisplay?(selected?.display, selected?.viewerID)
     }
 
@@ -701,13 +727,26 @@ final class VideoOutputServer {
         if client.mode == .webSocket { updatePrimaryDisplay() }
         if client.touching { onTouches?(client.id.uuidString, []); client.touching = false }
         if let reason { report(reason) }
-        else if client.mode != .request { report("\(client.peer) 已断开（剩余 \(viewerCount) 台）") }
+        else if client.mode != .request { report(CWL("{1} 已断开（剩余 {2} 台）", [String(describing: client.peer), String(describing: viewerCount)])) }
     }
 
+    #if DEBUG
+    private func logAirPlayRequest(from peer: String, method: String, path: String, status: Int) {
+        guard hls != nil else { return }
+        let kind = path.hasSuffix(".m3u8") ? CWL("播放列表") : path.hasSuffix(".mp4") ? CWL("初始化段") : path.hasSuffix(".m4s") ? CWL("视频分段") : CWL("其他资源")
+        let message = "AirPlay HTTP：\(peer) \(String(method.prefix(12))) \(kind) → \(status)"
+        if airPlayRequestDiagnostics.count < 24, airPlayRequestDiagnostics.insert(message).inserted { onLog?(message) }
+    }
+    #endif
+
     private func stopOnQueue() {
+        hlsKeyframeTimer?.cancel(); hlsKeyframeTimer = nil
         generation = UUID(); listener?.cancel(); listener = nil
         secureListener?.cancel(); secureListener = nil; securePort = nil
         httpsRoot = nil; hls = nil; browserAudio = false
+        #if DEBUG
+        airPlayRequestDiagnostics.removeAll()
+        #endif
         for client in Array(clients.values) {
             if client.touching { onTouches?(client.id.uuidString, []) }
             client.connection.cancel()
@@ -759,10 +798,10 @@ final class VideoOutputServer {
         case unsupportedFrame, frameTooLarge, invalidJSON, invalidTouch
         var errorDescription: String? {
             switch self {
-            case .unsupportedFrame: "不支持的 WebSocket 帧"
-            case .frameTooLarge: "WebSocket 帧过大"
-            case .invalidJSON: "控制消息不是有效 JSON"
-            case .invalidTouch: "触控坐标无效"
+            case .unsupportedFrame: CWL("不支持的 WebSocket 帧")
+            case .frameTooLarge: CWL("WebSocket 帧过大")
+            case .invalidJSON: CWL("控制消息不是有效 JSON")
+            case .invalidTouch: CWL("触控坐标无效")
             }
         }
     }

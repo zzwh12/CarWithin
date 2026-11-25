@@ -296,7 +296,7 @@ final class SettingsPageController: UITableViewController {
                     indicator.tintColor = .secondaryLabel
                     indicator.sizeToFit()
                     cell.accessoryView = indicator
-                    cell.accessibilityHint = "打开外部链接"
+                    cell.accessibilityHint = CWL("打开外部链接")
                 }
                 if !row.destructive, row.icon == nil, row.checked == nil { content.textProperties.color = .tintColor }
             case .view, .info:
@@ -326,12 +326,12 @@ final class SettingsPageController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
         guard let delete = sections[indexPath.section].rows[indexPath.row].onDelete else { return nil }
-        let configuration = UISwipeActionsConfiguration(actions: [UIContextualAction(style: .destructive, title: "删除") { [weak self] _, _, done in
+        let configuration = UISwipeActionsConfiguration(actions: [UIContextualAction(style: .destructive, title: CWL("删除")) { [weak self] _, _, done in
             guard let self else { done(false); return }
             let title = self.sections[indexPath.section].rows[indexPath.row].title
-            let confirmation = UIAlertController(title: "删除“\(title)”？", message: "删除后无法撤销。", preferredStyle: .alert)
-            confirmation.addAction(UIAlertAction(title: "取消", style: .cancel) { _ in done(false) })
-            confirmation.addAction(UIAlertAction(title: "删除", style: .destructive) { _ in
+            let confirmation = UIAlertController(title: CWL("删除“{1}”？", [String(describing: title)]), message: CWL("删除后无法撤销。"), preferredStyle: .alert)
+            confirmation.addAction(UIAlertAction(title: CWL("取消"), style: .cancel) { _ in done(false) })
+            confirmation.addAction(UIAlertAction(title: CWL("删除"), style: .destructive) { _ in
                 delete(); self.reload(); done(true)
             })
             self.present(confirmation, animated: true)

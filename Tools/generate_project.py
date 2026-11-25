@@ -20,7 +20,7 @@ def uid(name): return hashlib.sha1(name.encode()).hexdigest()[:24].upper()
 def q(value): return json.dumps(str(value))
 objects = []
 def add(key, value): objects.append(f'{uid(key)} = {{ {value} }};'); return uid(key)
-sources = sorted([*root.glob('App/*.swift'), *root.glob('App/*.m'), *root.rglob('Sources/TDSCarKitCore/**/*.swift'), *root.glob('Sources/CTDSCarKitCrypto/*.c')])
+sources = sorted([*root.glob('App/*.swift'), *root.glob('App/*.m'), *root.glob('App/*.c'), *root.rglob('Sources/TDSCarKitCore/**/*.swift'), *root.glob('Sources/CTDSCarKitCrypto/*.c')])
 refs = []; builds = []
 for path in sources:
     relative = str(path.relative_to(root))
@@ -32,6 +32,33 @@ assets = add('assets', 'isa = PBXFileReference; lastKnownFileType = folder.asset
 refs.append(assets)
 asset_resource = add('assets-build', f'isa = PBXBuildFile; fileRef = {assets};')
 resource_builds = [asset_resource]
+# Localized app strings and privacy prompts.
+localization_path = 'App/Localization/Localizable.xcstrings'
+localization_ref = add('ref:'+localization_path, f'isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = {q(localization_path)}; sourceTree = "<group>";')
+refs.append(localization_ref)
+resource_builds.append(add('build:'+localization_path, f'isa = PBXBuildFile; fileRef = {localization_ref};'))
+privacy_children = []
+for language in ['en', 'zh-Hans']:
+    path = f'App/Localization/{language}.lproj/InfoPlist.strings'
+    privacy_children.append(add('ref:'+path, f'isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = {q(language)}; path = {q(path)}; sourceTree = "<group>";'))
+privacy_group = add('privacy-localizations', f'isa = PBXVariantGroup; children = ({",".join(privacy_children)},); name = InfoPlist.strings; sourceTree = "<group>";')
+refs.append(privacy_group)
+resource_builds.append(add('privacy-build', f'isa = PBXBuildFile; fileRef = {privacy_group};'))
+for license_path in ['App/KCP-LICENSE.txt', 'App/ANTBMS-LICENSE.txt']:
+    license_ref = add('ref:'+license_path, f'isa = PBXFileReference; lastKnownFileType = text; path = {q(license_path)}; sourceTree = "<group>";')
+    refs.append(license_ref)
+    resource_builds.append(add('build:'+license_path, f'isa = PBXBuildFile; fileRef = {license_ref};'))
+receiver_path = 'App/Localization/Receiver.en.html'
+receiver_ref = add('ref:'+receiver_path, f'isa = PBXFileReference; lastKnownFileType = text.html; path = {q(receiver_path)}; sourceTree = "<group>";')
+refs.append(receiver_ref)
+resource_builds.append(add('build:'+receiver_path, f'isa = PBXBuildFile; fileRef = {receiver_ref};'))
+# Shared supporter snapshot and offline payment codes.
+for path in sorted(root.glob('App/Support/*')):
+    relative = str(path.relative_to(root))
+    filetype = 'text.json' if path.suffix == '.json' else 'image.png'
+    ref = add('ref:'+relative, f'isa = PBXFileReference; lastKnownFileType = {filetype}; path = {q(relative)}; sourceTree = "<group>";')
+    refs.append(ref)
+    resource_builds.append(add('build:'+relative, f'isa = PBXBuildFile; fileRef = {ref};'))
 # Bundle any staged MFi identity files at the app bundle root so the app can load them directly.
 for path in sorted(root.glob('App/BundledIdentity/*')):
     relative = str(path.relative_to(root))
@@ -69,7 +96,7 @@ for scope in ['project','target']:
         configs.append(add(scope+name, 'isa = XCBuildConfiguration; name = '+name+'; buildSettings = {'+' '.join(f'{k} = {q(v)};' for k,v in settings.items())+'};'))
     add(scope+'configs', f'isa = XCConfigurationList; buildConfigurations = ({",".join(configs)},); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;')
 add('target',f'isa = PBXNativeTarget; name = TDSCarKit; productName = TDSCarKit; productReference = {product}; productType = "com.apple.product-type.application"; buildConfigurationList = {uid("targetconfigs")}; buildPhases = ({uid("sources")},{uid("frameworks")},{uid("resources")},); buildRules = (); dependencies = ();')
-add('project',f'isa = PBXProject; attributes = {{ LastUpgradeCheck = 1600; }}; buildConfigurationList = {uid("projectconfigs")}; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; knownRegions = (en, Base); mainGroup = {uid("group")}; productRefGroup = {products}; projectDirPath = ""; projectRoot = ""; targets = ({uid("target")},);')
+add('project',f'isa = PBXProject; attributes = {{ LastUpgradeCheck = 1600; }}; buildConfigurationList = {uid("projectconfigs")}; compatibilityVersion = "Xcode 14.0"; developmentRegion = "zh-Hans"; knownRegions = ("zh-Hans", en, Base); mainGroup = {uid("group")}; productRefGroup = {products}; projectDirPath = ""; projectRoot = ""; targets = ({uid("target")},);')
 (project/'project.pbxproj').write_text('// !$*UTF8*$!\n{ archiveVersion = 1; classes = {}; objectVersion = 56; objects = {\n'+'\n'.join(objects)+f'\n}}; rootObject = {uid("project")}; }}\n')
 schemes=project/'xcshareddata/xcschemes';schemes.mkdir(parents=True,exist_ok=True)
 reference=f'<BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="{uid("target")}" BuildableName="TDSCarKit.app" BlueprintName="TDSCarKit" ReferencedContainer="container:TDSCarKit.xcodeproj"/>'

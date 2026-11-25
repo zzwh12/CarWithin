@@ -2,8 +2,24 @@ import Foundation
 import CryptoKit
 import Security
 
-/// Per-network credentials stay on this device, accessible only while unlocked.
+/// Persist passwords in Keychain when available; an entitlement fallback stays in process memory.
 enum WiFiCredentials {
+    // Some sideloading signatures cannot access Keychain. Keep only the current process's
+    // Wi-Fi password in memory in that case; never write a plaintext fallback to defaults.
+    private static let temporaryLock = NSLock()
+    private static var temporaryPasswords: [String: String] = [:]
+
+    static func isTemporary(for ssid: String) -> Bool {
+        temporaryLock.lock(); defer { temporaryLock.unlock() }
+        return temporaryPasswords[ssid] != nil
+    }
+
+    static let temporaryNotice = CWL("当前签名无法访问钥匙串（-34018）。密码仅在本次 App 运行期间保留，App 重新启动后需重新输入。若要长期保存，请使用具有钥匙串访问权限的有效签名重新安装。")
+
+    static func savedMessage(for ssid: String) -> String {
+        isTemporary(for: ssid) ? temporaryNotice : CWL("Wi-Fi 密码已保存到 Keychain")
+    }
+
     private static func query(_ ssid: String) -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: "local.tds.carkit.wifi",
@@ -11,6 +27,10 @@ enum WiFiCredentials {
     }
     static func password(for ssid: String) throws -> String? {
         guard !ssid.isEmpty else { return nil }
+        temporaryLock.lock()
+        let temporary = temporaryPasswords[ssid]
+        temporaryLock.unlock()
+        if let temporary { return temporary }
         var lookup = query(ssid); lookup[kSecReturnData as String] = true
         var result: CFTypeRef?
         let status = SecItemCopyMatching(lookup as CFDictionary, &result)
@@ -28,13 +48,20 @@ enum WiFiCredentials {
         if status == errSecItemNotFound {
             status = SecItemAdd(query(ssid).merging(attributes) { _, value in value } as CFDictionary, nil)
         }
-        guard status == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
+        guard status == errSecSuccess || status == errSecMissingEntitlement else {
+            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
+        }
+        temporaryLock.lock(); defer { temporaryLock.unlock() }
+        if status == errSecMissingEntitlement { temporaryPasswords[ssid] = password }
+        else { temporaryPasswords.removeValue(forKey: ssid) }
     }
     static func forget(_ ssid: String) throws {
         let status = SecItemDelete(query(ssid) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
         }
+        temporaryLock.lock(); defer { temporaryLock.unlock() }
+        temporaryPasswords.removeValue(forKey: ssid)
     }
 }
 
@@ -59,7 +86,7 @@ final class AirPlayCredentials {
     }
     func saveController(_ identifier: String, key: Data) throws {
         if let existing = try controller(identifier) {
-            guard existing.rawRepresentation == key else { throw ProtocolError.malformed("已配对控制端的密钥发生变化") }
+            guard existing.rawRepresentation == key else { throw ProtocolError.malformed(CWL("已配对控制端的密钥发生变化")) }
             return
         }
         var item = pairingQuery(identifier); item[kSecValueData as String] = key
@@ -75,7 +102,7 @@ final class AirPlayCredentials {
         let status = SecItemCopyMatching(lookup as CFDictionary, &result)
         if status == errSecSuccess, let data = result as? Data {
             let values = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
-            guard let key = values?["key"] as? Data, let id = values?["id"] as? String else { throw ProtocolError.malformed("已存储的 AirPlay 身份无效") }
+            guard let key = values?["key"] as? Data, let id = values?["id"] as? String else { throw ProtocolError.malformed(CWL("已存储的 AirPlay 身份无效")) }
             signingKey = try Curve25519.Signing.PrivateKey(rawRepresentation: key); identifier = id
         } else if status == errSecItemNotFound {
             signingKey = Curve25519.Signing.PrivateKey(); identifier = UUID().uuidString

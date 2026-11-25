@@ -11,7 +11,7 @@ final class MediaTCPListener {
         guard fd >= 0 else { throw POSIXError(.EIO) }
         var address = sockaddr_in(); address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size); address.sin_family = sa_family_t(AF_INET)
         var allowed = in_addr()
-        guard inet_pton(AF_INET, peerAddress, &allowed) == 1 else { close(fd); throw ProtocolError.malformed("需要 IPv4 媒体对端地址") }
+        guard inet_pton(AF_INET, peerAddress, &allowed) == 1 else { close(fd); throw ProtocolError.malformed(CWL("需要 IPv4 媒体对端地址")) }
         let bound = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
         guard bound == 0, listen(fd, 2) == 0, fcntl(fd, F_SETFL, O_NONBLOCK) == 0 else { close(fd); throw POSIXError(.EIO) }
         var size = socklen_t(MemoryLayout<sockaddr_in>.size)
@@ -59,7 +59,7 @@ final class MediaTCPConnection {
         }
     }
     func send(_ data: Data) throws {
-        guard !stopped, pending + data.count <= 256 * 1024 else { throw ProtocolError.limitExceeded("事件输出队列") }
+        guard !stopped, pending + data.count <= 256 * 1024 else { throw ProtocolError.limitExceeded(CWL("事件输出队列")) }
         pending += data.count
         let bytes = data.withUnsafeBytes { DispatchData(bytes: $0) }
         io.write(offset: 0, data: bytes, queue: queue) { [weak self] done, _, error in
@@ -95,7 +95,7 @@ final class MediaTiming {
         let fd = socket(AF_INET, SOCK_DGRAM, 0)
         guard fd >= 0 else { throw POSIXError(.EIO) }
         var remote = sockaddr_in(); remote.sin_len = UInt8(MemoryLayout<sockaddr_in>.size); remote.sin_family = sa_family_t(AF_INET); remote.sin_port = peerPort.bigEndian
-        guard inet_pton(AF_INET, peerAddress, &remote.sin_addr) == 1 else { close(fd); throw ProtocolError.malformed("时钟同步对端地址") }
+        guard inet_pton(AF_INET, peerAddress, &remote.sin_addr) == 1 else { close(fd); throw ProtocolError.malformed(CWL("时钟同步对端地址")) }
         var local = sockaddr_in(); local.sin_len = remote.sin_len; local.sin_family = remote.sin_family
         let bound = withUnsafePointer(to: &local) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
         guard bound == 0, fcntl(fd, F_SETFL, O_NONBLOCK) == 0 else { close(fd); throw POSIXError(.EIO) }

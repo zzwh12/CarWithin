@@ -1,0 +1,36 @@
+{
+  "upstream": "xmz28/CarWithin v1.0.3",
+  "original_files": {
+    "ZeehoOutput.swift": {
+      "sha256": "83373dbd335b1928385cc06ad6d481348a943d700d73e524428048aaf1bd612f",
+      "git_blob": "970d8faa8474e88b7ce2d1b3c3e4ff335420d76f"
+    },
+    "TailingConnection.swift": {
+      "sha256": "85edbfa81a640dbbbc9de5a48e3025fa2347ad1fa691020c7a9515166cd92be0",
+      "git_blob": "fb84e40e6a3ba3835e371054e745ad832d0f46f9"
+    },
+    "TailingProtocol.swift": {
+      "sha256": "9e24106eaab606faefd98e8a97be49652ac9e98f0a9ee4e3032d83c759498598",
+      "git_blob": "857e63ac3c3c81d6772c23861c8fc32260afd0c7"
+    },
+    "TailingSocket.swift": {
+      "sha256": "d1bc8e0a10f0d65e407800524d3418d854611850f4f576a82d14e6f7b796c838",
+      "git_blob": "855021a28bb859772350e613b462f842a5539b74"
+    },
+    "TailingIdentity.swift": {
+      "sha256": "576f84d85615861c6cb78bb572f1af545e63415f98bdab6d26b9dde610d9d981",
+      "git_blob": "4e023740490f723a6b6e2e63310a5383b0d4ab22"
+    }
+  },
+  "embedded_blocks": {
+    "output": "c7092f9c1943cc42816b9d89271f5c975aa8cb33a04d367f7076a45bfdeeb7cf",
+    "connection": "00bfc66b975ec4b1b0f1830b62c1c6c54f898be27d867cc701c36553ed77a9a7",
+    "protocol": "8131f6cb111c49980210d7a179b05cd2780884446c5d4a07f3986887d753a2f7",
+    "errors": "873111fc39488a593efde0614c6d2b15c114cbe0e0938ad85e7ca49cbefe3722"
+  },
+  "shared_original_files": [
+    "TailingSocket.swift",
+    "TailingIdentity.swift"
+  ],
+  "upstream_commit": "dfb6c25a239eb52e7fab39c1299cb4120a0780f0"
+}

@@ -10,12 +10,19 @@ CarWithin runs CarPlay on the same iPhone that generates its interface. Use CarP
 
 ## Download and install
 
-- [Download from GitHub Releases](https://github.com/xmz28/CarWithin/releases/latest). The current version is **1.0.3 (build 15)**.
-- Download `CarWithin-1.0.3-unsigned.ipa` and sign and install it with an IPA sideloading tool using your own signing setup. Follow any iOS prompts for developer trust or Developer Mode.
+- [Download from GitHub Releases](https://github.com/xmz28/CarWithin/releases/latest). The current version is **1.0.5 (build 17)**.
+- Download `CarWithin-1.0.5-unsigned.ipa` and sign and install it with an IPA sideloading tool using your own signing setup. Follow any iOS prompts for developer trust or Developer Mode.
 - The minimum installation target is iOS/iPadOS 16.0 on arm64; iOS 15 is not supported. Same-device CarPlay, audio, and background behavior still need testing on iOS 16.x hardware. CarWithin uses private iOS interfaces. Compatibility depends on the device, OS version, and signing setup, and OS updates can affect it.
 
-- If an IPA built from source reports a missing MFi identity, tap **导入 MFi 身份文件夹** on the home screen. In Files, select the folder containing the `certificate.p7b`, `leaf.cer` and `private.x963` files you are authorized to use. Once the app verifies and stores them, you can start local CarPlay.
-- When upgrading from a working build, keep the original signing team and App ID to retain access to its Keychain items. An identity loaded solely from the old app bundle was available only to that build.
+## What is new in 1.0.5
+
+- Added output profiles for ZEEHO SE+ 5/5.5-inch, AE2 Pro 5-inch, and CFMOTO 5/6.2-inch dashboards, with a reorganized output menu.
+- Added optional ANT BMS telemetry and battery cards, disabled by default.
+- Added English app and browser-receiver interfaces; some new dashboard messages still fall back to Chinese.
+- Improved saved Wi-Fi passwords, CarLife discovery and AirPlay recovery, and added supporter and contributor views.
+- Added Feedback & Suggestions between Diagnostics and experiments and About.
+
+The maintainer checked existing functionality for regressions. The new ZEEHO, CFMOTO and ANT BMS paths still need corresponding hardware testing by the maintainer; builds and simulated protocol tests do not establish compatibility with every model.
 
 ## Quick start
 
@@ -59,7 +66,7 @@ These modes do not create an internet tunnel or guarantee access through a head 
 
 - **Follow the receiving display.** The browser reports its viewport. When several receiver pages connect, the first one determines the stream settings and the others receive the same video stream. If the first page closes, a remaining page can take over.
 - **Use a fixed size.** If a head unit stretches the picture, shows a black screen, or stutters, try a fixed lower resolution, 30 FPS, or H.264 in the display settings. Applying a new display configuration may require restarting CarPlay.
-- **Enter a custom size.** In Settings → Display → Screen size, choose 自定义尺寸, enter the width and height in pixels (for example, 1920 × 720), and save. The next CarPlay session uses these dimensions. For CarbitLink this sets the local CarPlay picture size. The head unit negotiates the outgoing video dimensions separately.
+- **Enter a custom size.** In Settings → Display → Screen size, choose **Custom Size**, enter the width and height in pixels (for example, 1920 × 720), and save. The next CarPlay session uses these dimensions. For CarbitLink this sets the local CarPlay picture size. The head unit negotiates the outgoing video dimensions separately.
 - **Customize the vehicle button.** Use the vehicle settings to enable the button, pick a photo as its icon, or restore the default. Changes take effect when CarPlay starts again. In app fullscreen, use the vehicle button on the CarPlay home screen to exit. If the vehicle button is disabled, use the upper-left exit button.
 - **Picture in Picture and background playback.** Choose when PiP should start in the Background and PiP section on the settings home page. The default is When leaving the app; you can also choose immediately after video appears or turn off automatic activation. For lock-screen use, enable **Allow CarPlay While Locked** under **Settings → General → CarPlay → CarWithin** on the iPhone. PiP shows live video. Use the app or browser for touch input.
 
@@ -80,23 +87,41 @@ Fixed display sizes support common landscape and portrait aspect ratios.
 
 ### CarbitLink direct output (experimental)
 
-1. Open the QR connection screen in the head unit's CarbitLink app. On iPhone, select **Settings → Current output → 亿连直连（实验）** in CarWithin. Open **Output settings → 扫描车机二维码** and tap the QR code in the camera view.
-2. Join a Wi-Fi network that allows the iPhone and head unit to reach each other and select or save the matching Wi-Fi preset in CarWithin. Scanning fills in the head unit IP when the code contains a private IPv4 address. If it contains only a network name, download link or pairing token, use **查找局域网车机** to select an advertised head unit or enter its known IP.
+1. Open the QR connection screen in the head unit's CarbitLink app. On iPhone, select **Settings → Current Output → CarbitLink Direct (Experimental)** in CarWithin. Open **Output Settings → Scan Head Unit QR Code** and tap the QR code in the camera view.
+2. Join a Wi-Fi network that allows the iPhone and head unit to reach each other and select or save the matching Wi-Fi preset in CarWithin. Scanning fills in the head unit IP when the code contains a private IPv4 address. If it contains only a network name, download link or pairing token, use **Find Head Units on Wi-Fi** to select an advertised head unit or enter its known IP.
 3. Start local CarPlay. Once the head unit accepts the iOS PXC session and requests video, the connection card shows the resolution being sent. Video uses H.264 at up to 1920×1080 and 30 fps. Use the iPhone for touch and route audio through the iPhone or car Bluetooth.
 
 CarWithin connects with its own application identity and sends the local CarPlay picture. QR codes are processed on the iPhone. This mode requires local network projection support. Firmware that requires cloud pairing is unsupported. The factory Ford Mondeo head unit still needs an in-car test. [Carbit connectivity overview](https://carbit.com.cn/new/connect)
 
 ### ZEEHO AE4 MAX2+ 6.2-inch display
 
-Connect the iPhone to the instrument Wi-Fi, select the matching preset and choose ZEEHO 6.2-inch under Current output. Open projection on the instrument, then start CarPlay. The default instrument IP is 192.168.0.1. Video uses H.264 at 1024×480 and up to 25 fps. Audio plays through the iPhone or Bluetooth. Operate CarPlay on the phone.
+Connect the iPhone to the instrument Wi-Fi, select the matching preset and choose ZEEHO 6.2-inch under Current output. Open projection on the instrument, then start CarPlay. Instrument IP discovery is enabled by default; turn it off under Output settings to use the retained manual address. Video uses H.264 at 1024×480 and up to 25 fps. Audio plays through the iPhone or Bluetooth. Operate CarPlay on the phone.
 
 One instrument was tested successfully, including screen lock. Other models and long sessions require further testing.
 
+### ZEEHO AE2 Pro 5-inch display
+
+Connect the iPhone to the dashboard Wi-Fi, select the matching preset, then choose `极核 AE2 Pro 5 寸` under Current output. Start projection on the dashboard and start CarPlay in the app. The default dashboard address is `192.168.0.1`, configurable in Output settings. Video uses H.264 at the size reported by the dashboard, up to 25 fps. Projection was confirmed on one AE2 Pro.
+
+### Additional dashboard support
+
+- **Ninebot 7-inch:** Connect to the dashboard Wi-Fi, select this output, start CarPlay, then enable navigation casting in Ninebot app and keep it running in the background. Display was confirmed on one dashboard.
+- **Ninebot 4.3-inch:** Uses the N1 90 protocol, with default address `192.168.169.1`. Follow the same startup order. Physical dashboard testing is pending.
+- **AirPlay (experimental):** Startup and reconnection may fail, and the receiver may retain the last picture after stopping.
+
+### ZEEHO SE+ 5/5.5-inch display
+
+Choose the separate SE+ output. The 5/5.5-inch label names the intended profile family: one profile negotiates the reported pixel dimensions, rather than two independently verified physical-size implementations. Both ZEEHO modes offer automatic IP discovery and retain manual addresses. The 6.2-inch mode keeps its isolated original handshake/output at 1024×480 and 25 FPS.
+
+SE+ offers a 1600×770 wide canvas or 800×480 compatibility canvas, plus 25/30/60 FPS targets. Start with 30 FPS and default compatibility transcoding. H.264 passthrough is opt-in and still needs instrument testing, as do sustained 60 FPS and lock-screen stability. Sent FPS is not panel refresh. The sound page provides the system audio route picker. See [implementation and validation scope](docs/zeeho-seplus-experimental.md).
+
 ### Ninebot 5-inch display
 
-Connect the iPhone to the instrument Wi-Fi, select its saved Wi-Fi preset, and choose Ninebot 5-inch under Current output. Enable screen projection on the instrument, then start CarPlay. The default instrument IP is `192.168.1.1`, configurable under Output settings. Audio plays through the iPhone or Bluetooth; control CarPlay on the phone.
+Connect the iPhone to the instrument Wi-Fi, select its saved Wi-Fi preset, and choose Ninebot 5-inch under Current output. Start CarPlay. If the dashboard has no picture, keep CarWithin running, enable projection navigation in the Ninebot app, then close the Ninebot app from the app switcher after the dashboard shows a picture and return to CarWithin. The default instrument IP is `192.168.1.1`, configurable under Output settings. Audio plays through the iPhone or Bluetooth; control CarPlay on the phone.
 
 One instrument was tested with repeated backgrounding and screen locks. Perceived latency was approximately 500–600 ms. Other instrument versions need testing.
+
+**Startup order: start local CarPlay in CarWithin first, then enable navigation casting in the Ninebot app.** Starting Ninebot casting first can occupy the local casting port. If you see `bind …:5012 failed: Address already in use (errno 48)`, stop CarWithin, exit navigation casting in the Ninebot app and other casting apps, then retry in that order. This error means a local port is occupied; if Wi-Fi also disconnects, include the startup log so it can be investigated separately. Whether the Ninebot app must remain running for a 5-inch dashboard varies by model. For 7-inch and 4.3-inch dashboards, keep it in the background as described in their sections.
 
 ### Tailing 4.3-inch display
 
@@ -109,6 +134,24 @@ This mode targets the **TL-DASH-V2** instrument display. Other models and firmwa
 The instrument receives 480×272 video at up to 20 FPS. Audio uses the iPhone's current speaker or Bluetooth route. The instrument does not send touch input back; operate CarPlay on the iPhone. Matching display parameters are applied automatically; switching to another output restores its previous settings.
 
 Video and recovery after locking the iPhone have been confirmed on one instrument. If locking invalidates the decoder, CarWithin rebuilds it from a keyframe and resumes; a brief pause may occur. Extended playback, repeated locking, network-loss recovery, and other instruments have not all been verified.
+
+### CFMOTO 5-inch and 6.2-inch dashboards
+
+Join the dashboard Wi-Fi on the iPhone, select the corresponding CFMOTO output, enable dashboard projection and start CarPlay. Set the dashboard address in Output settings. Leaving it blank tries `.1` on the local subnet; this is a guess, not a discovered DHCP gateway. Enter the real address if it fails. A separate PXC session uses TCP 10920/10921/10922 and probe port 10930, with negotiated, aligned video dimensions. Audio and controls remain on the iPhone or its Bluetooth device. The maintainer has no CFMOTO dashboard, so connection, video and background behavior need hardware testing.
+
+### ANT BMS battery cards
+
+Enable reading under Settings → Battery & BMS and explicitly select the Bluetooth device. The feature is off by default and only queries telemetry; it does not change battery parameters. Configure fields, position, size and transparency for charge level, voltage, current, power, temperature and cell-voltage spread. Old values are hidden after five seconds without valid new data.
+
+Cards currently appear in the phone CarPlay preview and Ninebot 5/7-inch video. Ninebot 4.3-inch, browser and other dashboard outputs do not include the card in this version. The maintainer has no ANT BMS hardware; connectivity, background behavior and model compatibility need testing. See [implementation scope](docs/ant-bms-display.md).
+
+## Feedback, support and contributors
+
+Settings → Feedback & Suggestions opens the [feedback survey](https://v.wjx.cn/vm/e5IX6eZ.aspx). Copy diagnostic logs from Diagnostics and experiments → Logs → Copy logs, and check for unrelated personal information before submitting them.
+
+About → Appreciation & Support lists supporters and development/testing contributions; Buy me a coffee provides Alipay and WeChat options. Support is optional and does not affect features, updates or adaptation priorities.
+
+Code contributions in this release: [yiquchangge1](https://github.com/yiquchangge1) (SE+), [武汉 / yuliang-shuji](https://github.com/yuliang-shuji) (AE2 Pro), [Boos4721](https://github.com/Boos4721) (ANT BMS), and [扫毒单位 / SDDW007](https://github.com/SDDW007) (CFMOTO). Original commits and GitHub authorship are preserved.
 
 ## Check for updates and install a newer version
 

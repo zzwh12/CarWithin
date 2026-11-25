@@ -29,6 +29,8 @@ final class CarLifeOutput {
     private var parameters = VideoParameterSets(codec: .h264)
     private var warnedCodec = false
     private var discoverySocket: Int32 = -1
+    private var querySocket: Int32 = -1
+    private var queryReplies = 0
     private var discoveryErrorLogged = false
     private var timer: DispatchSourceTimer?
 
@@ -47,20 +49,25 @@ final class CarLifeOutput {
             self.targetAddress = targetAddress.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
             self.videoWidth = width; self.videoHeight = height; self.maxFPS = max(1, min(60, fps))
             let run = self.generation
+            self.listenForDiscoveryQueries()
             for (index, port) in Self.ports.enumerated() { self.listen(port: port, channel: index + 1, run: run) }
             let timer = DispatchSource.makeTimerSource(queue: self.queue)
             timer.schedule(deadline: .now() + 0.2, repeating: 1)
             var ticks = 0
             timer.setEventHandler { [weak self] in
                 guard let self, self.generation == run else { return }
+                self.receiveDiscoveryQueries()
                 self.session?.tick()
                 self.checkSession()
+                if ticks == 15, self.session == nil {
+                    self.log("CarLife: no TCP callback after 15 s; UDP 8999 ready replies: \(self.queryReplies). Verify receiver CarLife mode and hotspot connection.")
+                }
                 // Announce every 2 s until a head unit has authenticated.
                 if ticks % 2 == 0, self.session?.authenticated != true { self.discover() }
                 ticks += 1
             }
             timer.resume(); self.timer = timer
-            self.state("CarLife：正在等待车机连接（端口 \(Self.ports[0])）")
+            self.state(CWL("CarLife：正在等待车机连接（端口 {1}）", [String(describing: Self.ports[0])]))
         }
     }
 
@@ -78,11 +85,11 @@ final class CarLifeOutput {
         parameters.allowLocalEndpointReuse = true
         guard let endpointPort = NWEndpoint.Port(rawValue: port),
               let listener = try? NWListener(using: parameters, on: endpointPort) else {
-            log("CarLife 端口 \(port) 无法监听"); return
+            log(CWL("CarLife 端口 {1} 无法监听", [String(describing: port)])); return
         }
         listener.stateUpdateHandler = { [weak self] state in
             guard let self, self.generation == run else { return }
-            if case .failed(let error) = state { self.log("CarLife 端口 \(port) 监听失败：\(error.localizedDescription)") }
+            if case .failed(let error) = state { self.log(CWL("CarLife 端口 {1} 监听失败：{2}", [String(describing: port), String(describing: error.localizedDescription)])) }
         }
         listener.newConnectionHandler = { [weak self] connection in
             guard let self, self.generation == run else { connection.cancel(); return }
@@ -95,15 +102,16 @@ final class CarLifeOutput {
     private func accept(_ connection: NWConnection, channel: Int) {
         let peer: String
         if case .hostPort(let host, _) = connection.endpoint { peer = "\(host)".split(separator: "%").first.map(String.init) ?? "\(host)" }
-        else { peer = "车机" }
+        else { peer = CWL("车机") }
         if let existing = session, existing.peer != peer {
             // One head unit at a time.
             connection.cancel(); return
         }
+        log("CarLife TCP channel \(channel) connected from \(peer)")
         let link = Link(connection: connection, channel: channel)
         if session == nil || (channel == 1 && session?.ownsChannel(1) == true) {
             // A new control socket always starts a new authenticated lifetime.
-            session?.close(reason: "控制连接被替换")
+            session?.close(reason: CWL("控制连接被替换"))
             parameters = VideoParameterSets(codec: .h264)
             session = makeSession(peer: peer)
         }
@@ -113,7 +121,7 @@ final class CarLifeOutput {
             guard let self, let session, let link else { return }
             switch state {
             case .ready: self.receive(link, session: session)
-            case .failed, .cancelled: self.ended(session, link: link, reason: "连接已断开")
+            case .failed, .cancelled: self.ended(session, link: link, reason: CWL("连接已断开"))
             default: break
             }
         }
@@ -140,10 +148,10 @@ final class CarLifeOutput {
                     guard self.session === session else { return }
                 }
             } catch {
-                session.close(reason: "协议错误：\(error.localizedDescription)")
+                session.close(reason: CWL("协议错误：{1}", [String(describing: error.localizedDescription)]))
                 self.ended(session, link: link, reason: nil); return
             }
-            if complete || error != nil { self.ended(session, link: link, reason: "车机关闭了连接"); return }
+            if complete || error != nil { self.ended(session, link: link, reason: CWL("车机关闭了连接")); return }
             self.receive(link, session: session)
         }
     }
@@ -151,17 +159,17 @@ final class CarLifeOutput {
     private func ended(_ session: Session, link: Link, reason: String?) {
         link.connection.cancel()
         guard self.session === session, session.owns(link) || !session.active else { return }
-        session.close(reason: reason ?? "会话结束")
+        session.close(reason: reason ?? CWL("会话结束"))
         self.session = nil
         parameters = VideoParameterSets(codec: .h264)
-        if running { state("CarLife：已断开，正在等待车机重新连接") }
+        if running { state(CWL("CarLife：已断开，正在等待车机重新连接")) }
     }
 
     private func checkSession() {
         guard let session, let failure = session.transportFailure() else { return }
         session.close(reason: failure)
         self.session = nil
-        state("CarLife：\(failure)，正在等待车机重新连接")
+        state(CWL("CarLife：{1}，正在等待车机重新连接", [String(describing: failure)]))
     }
 
     // MARK: Video
@@ -169,7 +177,7 @@ final class CarLifeOutput {
     private func appendOnQueue(_ accessUnit: Data, codec: VideoCodec) {
         guard running else { return }
         guard codec == .h264 else {
-            if !warnedCodec { warnedCodec = true; log("CarLife 只支持 H.264，当前 CarPlay 输出 \(codec.displayName)，已忽略画面") }
+            if !warnedCodec { warnedCodec = true; log(CWL("CarLife 只支持 H.264，当前 CarPlay 输出 {1}，已忽略画面", [String(describing: codec.displayName)])) }
             return
         }
         guard let units = try? AnnexB.units(in: accessUnit) else { return }
@@ -223,7 +231,67 @@ final class CarLifeOutput {
         }
         if failures > 0, !discoveryErrorLogged {
             discoveryErrorLogged = true
-            log("CarLife 发现包有 \(failures)/\(targets.count) 个发送失败（errno \(lastError)）；广播在 iOS 上可能被限制，仍会逐个地址发送。找不到车机时请填写车机 IP")
+            log(CWL("CarLife 发现包有 {1}/{2} 个发送失败（errno {3}）；广播在 iOS 上可能被限制，仍会逐个地址发送。找不到车机时请填写车机 IP", [String(describing: failures), String(describing: targets.count), String(describing: lastError)]))
+        }
+    }
+
+    // Some receivers query the phone on UDP 8999 instead of reacting to the 7999 beacon.
+    // Kept on the session queue so restart/stop cannot race a receive on a reused descriptor.
+    private func listenForDiscoveryQueries() {
+        let fd = socket(AF_INET, SOCK_DGRAM, 0)
+        guard fd >= 0 else { log("CarLife UDP 8999 socket failed: \(errno)"); return }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = UInt16(8999).bigEndian
+        let result = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard result == 0, fcntl(fd, F_SETFL, O_NONBLOCK) == 0 else {
+            let failure = errno; close(fd)
+            log("CarLife UDP 8999 listen failed: \(failure)"); return
+        }
+        querySocket = fd
+        log("CarLife discovery: UDP 8999 listening; UDP 7999 beacon enabled")
+    }
+
+    private func receiveDiscoveryQueries() {
+        guard querySocket >= 0 else { return }
+        // Bound the work per tick even when another device floods this port.
+        for _ in 0..<32 {
+            var address = sockaddr_in()
+            var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+            var bytes = [UInt8](repeating: 0, count: 2048)
+            let count = withUnsafeMutablePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    recvfrom(querySocket, &bytes, bytes.count, 0, $0, &length)
+                }
+            }
+            guard count >= 0 else { return }
+            guard let host = inet_ntoa(address.sin_addr) else { continue }
+            let peer = String(cString: host)
+            let allowed = targetAddress.map { $0 == peer }
+                ?? Self.localNetworks().contains { $0.hosts.contains(peer) }
+            guard allowed else { continue }
+            let text = String(decoding: bytes.prefix(count), as: UTF8.self)
+            guard text.contains("carlifehost") else { continue }
+            // Do not bounce ready responses between two phone-side implementations.
+            if let json = try? JSONSerialization.jsonObject(with: Data(bytes.prefix(count))) as? [String: Any],
+               json["status"] as? String == "ready" { continue }
+            let reply = Data("{\"carlifehost\":\"carlife\",\"status\":\"ready\"}".utf8)
+            let sent = reply.withUnsafeBytes { data in
+                withUnsafePointer(to: &address) {
+                    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                        sendto(querySocket, data.baseAddress, data.count, 0, $0, length)
+                    }
+                }
+            }
+            queryReplies += 1
+            if queryReplies == 1 || queryReplies % 30 == 0 {
+                log("CarLife discovery query from \(peer):\(UInt16(bigEndian: address.sin_port)); ready reply \(sent == reply.count ? "sent" : "failed")")
+            }
         }
     }
 
@@ -259,10 +327,12 @@ final class CarLifeOutput {
         generation = UUID(); running = false
         timer?.cancel(); timer = nil
         listeners.forEach { $0.cancel() }; listeners.removeAll()
-        session?.close(reason: "CarPlay 已停止"); session = nil
+        session?.close(reason: CWL("CarPlay 已停止")); session = nil
         parameters = VideoParameterSets(codec: .h264); warnedCodec = false
         if discoverySocket >= 0 { close(discoverySocket); discoverySocket = -1 }
         discoveryErrorLogged = false
+        if querySocket >= 0 { close(querySocket); querySocket = -1 }
+        queryReplies = 0
     }
 
     private func log(_ message: String) { onLog?(message) }
@@ -271,7 +341,10 @@ final class CarLifeOutput {
         DispatchQueue.main.async { [weak self] in self?.onState?(message) }
     }
 
-    deinit { if discoverySocket >= 0 { close(discoverySocket) } }
+    deinit {
+        if discoverySocket >= 0 { close(discoverySocket) }
+        if querySocket >= 0 { close(querySocket) }
+    }
 }
 
 // MARK: - Transport link
@@ -551,7 +624,7 @@ private final class Session {
 
     func attach(_ link: Link) {
         channels.updateValue(link, forKey: link.channel)?.connection.cancel()
-        if link.channel == 1 { log?("车机 \(peer) 已连接") }
+        if link.channel == 1 { log?(CWL("车机 {1} 已连接", [String(describing: peer)])) }
     }
     func owns(_ link: Link) -> Bool { channels[link.channel] === link }
     func ownsChannel(_ channel: Int) -> Bool { channels[channel] != nil }
@@ -566,13 +639,13 @@ private final class Session {
             try require(profile == nil, "unexpected_phase")
             let payload = try proto()
             guard let major = payload.number(1), let selected = Profile(major: major) else {
-                log?("车机协议版本不受支持（\(payload.number(1).map(String.init) ?? "无")）")
+                log?(CWL("车机协议版本不受支持（{1}）", [String(describing: payload.number(1).map(String.init) ?? CWL("无"))]))
                 throw CarLifeError.protocolViolation("version_mismatch")
             }
             profile = selected
-            log?("协议版本 \(major).\(payload.number(2) ?? 0)，\(selected == .legacy ? "3.x 车机" : "4.x 车机")")
+            log?(CWL("协议版本 {1}.{2}，{3}", [String(describing: major), String(describing: payload.number(2) ?? 0), String(describing: selected == .legacy ? CWL("3.x 车机") : CWL("4.x 车机"))]))
             send(1, 65538, CarLifeProtoWriter().number(1, 1).number(2, major).data)
-            onState?("CarLife：车机 \(peer) 已连接，正在认证")
+            onState?(CWL("CarLife：车机 {1} 已连接，正在认证", [String(describing: peer)]))
         case 98343, 98307:
             sendDevice()
         case 98376:
@@ -588,7 +661,7 @@ private final class Session {
             send(1, 65611, CarLifeProtoWriter().number(1, 1).data)
         case 98380:
             try require(authAccepted, "unexpected_phase")
-            established(reason: "认证通过")
+            established(reason: CWL("认证通过"))
             let flags: [(String, Int64)] = [("AAC_SUPPORT", 0), ("CONTENT_ENCRYPTION", 0), ("CONNECT_TYPE", 5)]
             var writer = CarLifeProtoWriter().number(1, Int64(flags.count))
             for (key, value) in flags { writer = writer.bytes(2, CarLifeProtoWriter().text(1, key).number(2, value).data) }
@@ -597,7 +670,7 @@ private final class Session {
             let wantsEncryption = try proto().messages(2).contains { $0.text(1) == "CONTENT_ENCRYPTION" && $0.number(2) == 1 }
             if wantsEncryption, !encryptionRequested, !crypto.active {
                 encryptionRequested = true
-                log?("车机要求内容加密")
+                log?(CWL("车机要求内容加密"))
                 send(1, 65642)
             }
         case 98411:
@@ -609,10 +682,10 @@ private final class Session {
             send(1, 65646)
         case 98415:
             try crypto.activate()
-            log?("内容加密已启用")
+            log?(CWL("内容加密已启用"))
         case 98311:
             // A receiver that does not challenge establishes the session at video negotiation.
-            if !authenticated, profile == .legacy { established(reason: "车机无需认证") }
+            if !authenticated, profile == .legacy { established(reason: CWL("车机无需认证")) }
             try require(authenticated, "unexpected_phase")
             let payload = try proto()
             guard let rawWidth = payload.number(1), let rawHeight = payload.number(2),
@@ -622,23 +695,23 @@ private final class Session {
             let requestedFPS = Int(payload.number(3) ?? 0)
             fps = requestedFPS > 0 ? min(max(requestedFPS, 1), maxFPS) : maxFPS
             encoderChannel = message.channel
-            log?("车机屏幕 \(rawWidth)×\(rawHeight)，请求 \(requestedFPS) FPS；发送 \(width)×\(height) @ \(fps) FPS H.264")
+            log?(CWL("车机屏幕 {1}×{2}，请求 {3} FPS；发送 {4}×{5} @ {6} FPS H.264", [String(describing: rawWidth), String(describing: rawHeight), String(describing: requestedFPS), String(describing: width), String(describing: height), String(describing: fps)]))
             send(encoderChannel, 65544, CarLifeProtoWriter().number(1, Int64(width)).number(2, Int64(height)).number(3, Int64(fps)).data)
         case 98313:
             try require(authenticated, "unexpected_phase")
             streaming = true; waitingForKeyframe = true
-            onState?("CarLife：车机已请求画面，正在等待关键帧")
-            requestKeyframe("车机请求画面")
+            onState?(CWL("CarLife：车机已请求画面，正在等待关键帧"))
+            requestKeyframe(CWL("车机请求画面"))
         case 98314:
             streaming = false
             releaseTouches()
-            onState?("CarLife：车机暂停了画面")
+            onState?(CWL("CarLife：车机暂停了画面"))
         case 98389:
-            if let code = try? proto().text(1) { log?("车机状态码 \(code.prefix(40))") }
+            if let code = try? proto().text(1) { log?(CWL("车机状态码 {1}", [String(describing: code.prefix(40))])) }
         case 425985, 425998:
             guard authenticated else { break }
             do { try touch(message.payload, raw: message.id == 425998) }
-            catch { log?("忽略无效触控数据") }
+            catch { log?(CWL("忽略无效触控数据")) }
         case 425992:
             guard authenticated, let code = try? proto().number(1), let control = Self.control(forKey: code) else { break }
             onControl?(control)
@@ -650,7 +723,7 @@ private final class Session {
 
     private func established(reason: String) {
         authenticated = true
-        onState?("CarLife：已与车机 \(peer) 建立会话（\(reason)）")
+        onState?(CWL("CarLife：已与车机 {1} 建立会话（{2}）", [String(describing: peer), String(describing: reason)]))
     }
 
     private func sendDevice() {
@@ -670,8 +743,8 @@ private final class Session {
         } else if !keyframe, videoLink.pendingBytes > skipPendingBytes {
             // Never drop a single dependent frame: skip the rest of this GOP and ask for an IDR.
             waitingForKeyframe = true; skips += 1
-            if skips == 1 || skips % 10 == 0 { log?("车机网络跟不上，跳到下一个关键帧（第 \(skips) 次）") }
-            requestKeyframe("网络积压")
+            if skips == 1 || skips % 10 == 0 { log?(CWL("车机网络跟不上，跳到下一个关键帧（第 {1} 次）", [String(describing: skips)])) }
+            requestKeyframe(CWL("网络积压"))
             return
         }
         func annexB(_ units: [Data]) -> Data {
@@ -694,7 +767,7 @@ private final class Session {
         }
         guard send(2, 131073, annexB(units)) else { return }
         framesSent += 1
-        if framesSent == 1 { onState?("CarLife：正在向车机 \(peer) 发送 CarPlay 画面") }
+        if framesSent == 1 { onState?(CWL("CarLife：正在向车机 {1} 发送 CarPlay 画面", [String(describing: peer)])) }
     }
 
     func tick() {
@@ -707,12 +780,12 @@ private final class Session {
 
     private func requestKeyframe(_ reason: String?) {
         lastKeyframeRequest = .now()
-        onKeyframeRequest?(reason ?? "定期刷新")
+        onKeyframeRequest?(reason ?? CWL("定期刷新"))
     }
 
     func transportFailure() -> String? {
-        if channels.values.contains(where: \.stalled) { return "车机连接写入超时" }
-        if !authenticated, DispatchTime.now().uptimeNanoseconds - createdAt.uptimeNanoseconds >= 30_000_000_000 { return "车机认证超时" }
+        if channels.values.contains(where: \.stalled) { return CWL("车机连接写入超时") }
+        if !authenticated, DispatchTime.now().uptimeNanoseconds - createdAt.uptimeNanoseconds >= 30_000_000_000 { return CWL("车机认证超时") }
         return nil
     }
 
@@ -725,7 +798,7 @@ private final class Session {
             lastSent = .now()
             return true
         } catch {
-            log?("发送失败：\(error.localizedDescription)"); return false
+            log?(CWL("发送失败：{1}", [String(describing: error.localizedDescription)])); return false
         }
     }
 
@@ -813,7 +886,7 @@ private final class Session {
     func close(reason: String) {
         guard active else { return }
         active = false
-        log?("会话结束：\(reason)（已发送 \(framesSent) 帧）")
+        log?(CWL("会话结束：{1}（已发送 {2} 帧）", [String(describing: reason), String(describing: framesSent)]))
         channels.values.forEach { $0.connection.cancel() }
         channels.removeAll()
         releaseTouches()

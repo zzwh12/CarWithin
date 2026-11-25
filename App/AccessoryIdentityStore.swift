@@ -17,18 +17,13 @@ enum AccessoryIdentityStore {
         return try AccessoryIdentity(certificateChain: chain, leafCertificate: leaf, privateKey: key)
     }
 
-    static func loadIfStored() throws -> AccessoryIdentity? {
-        do { return try load() }
-        catch StoreError.identityMissing { return nil }
-    }
-
     /// Loads an MFi identity bundled inside the app (certificate.p7b, leaf.cer, private.x963).
     /// Used so a sideloaded build works without a per-device import step.
-    static func loadFromBundle() throws -> AccessoryIdentity? {
+    static func loadFromBundle() throws -> AccessoryIdentity {
         guard let chainURL = Bundle.main.url(forResource: "certificate", withExtension: "p7b"),
               let leafURL = Bundle.main.url(forResource: "leaf", withExtension: "cer"),
               let keyURL = Bundle.main.url(forResource: "private", withExtension: "x963") else {
-            return nil
+            throw StoreError.identityMissing
         }
         let chain = try readBounded(chainURL)
         let leaf = try readBounded(leafURL)
@@ -39,39 +34,11 @@ enum AccessoryIdentityStore {
 
     static func importFromDocuments() throws -> AccessoryIdentity {
         let directory = try stagingDirectory()
-        let identity: AccessoryIdentity
-        do {
-            defer { try? FileManager.default.removeItem(at: directory.appendingPathComponent("private.x963")) }
-            identity = try importDirectory(directory)
-        }
-        for name in ["certificate.p7b", "leaf.cer"] {
-            try? FileManager.default.removeItem(at: directory.appendingPathComponent(name))
-        }
-        if (try? FileManager.default.contentsOfDirectory(atPath: directory.path))?.isEmpty == true {
-            try? FileManager.default.removeItem(at: directory)
-        }
-        return identity
-    }
-
-    /// The chosen folder belongs to the user. Read its files in place, including from Files providers.
-    static func importSelectedFolder(_ folder: URL) throws -> AccessoryIdentity {
-        if let existing = try loadIfStored() { return existing }
-        let access = folder.startAccessingSecurityScopedResource()
-        defer { if access { folder.stopAccessingSecurityScopedResource() } }
-        var coordinationError: NSError?
-        var imported: Result<AccessoryIdentity, Error>?
-        NSFileCoordinator().coordinate(readingItemAt: folder, options: [], error: &coordinationError) { url in
-            imported = Result { try importDirectory(url) }
-        }
-        if let coordinationError { throw coordinationError }
-        guard let imported else { throw StoreError.documentsUnavailable }
-        return try imported.get()
-    }
-
-    private static func importDirectory(_ directory: URL) throws -> AccessoryIdentity {
         let chainURL = directory.appendingPathComponent("certificate.p7b")
         let leafURL = directory.appendingPathComponent("leaf.cer")
         let keyURL = directory.appendingPathComponent("private.x963")
+        defer { try? FileManager.default.removeItem(at: keyURL) }
+
         let chain = try readBounded(chainURL)
         let leaf = try readBounded(leafURL)
         var keyData = try readBounded(keyURL)
@@ -82,7 +49,11 @@ enum AccessoryIdentityStore {
             try replacePrivateKey(keyData)
             try replaceData(chain, account: chainAccount)
             try replaceData(leaf, account: leafAccount)
-            return try load()
+            let identity = try load()
+            try? FileManager.default.removeItem(at: chainURL)
+            try? FileManager.default.removeItem(at: leafURL)
+            try? FileManager.default.removeItem(at: directory)
+            return identity
         } catch {
             deleteStoredIdentity()
             throw error
@@ -198,13 +169,13 @@ enum AccessoryIdentityStore {
 
         var errorDescription: String? {
             switch self {
-            case .documentsUnavailable: return "App 的 Documents 目录不可用"
-            case .identityMissing: return "Keychain 中未存储 MFi 身份"
-            case .invalidStagingFile(let name): return "身份导入文件缺失或无效：\(name)"
-            case .invalidPrivateKey: return "导入的 P-256 私钥无效"
-            case .invalidStoredIdentity: return "已存储的 MFi 身份无效"
+            case .documentsUnavailable: return CWL("App 的 Documents 目录不可用")
+            case .identityMissing: return CWL("Keychain 中未存储 MFi 身份")
+            case .invalidStagingFile(let name): return CWL("身份导入文件缺失或无效：{1}", [String(describing: name)])
+            case .invalidPrivateKey: return CWL("导入的 P-256 私钥无效")
+            case .invalidStoredIdentity: return CWL("已存储的 MFi 身份无效")
             case .keychain(let status):
-                return (SecCopyErrorMessageString(status, nil) as String?) ?? "Keychain 错误 \(status)"
+                return (SecCopyErrorMessageString(status, nil) as String?) ?? CWL("Keychain 错误 {1}", [String(describing: status)])
             }
         }
     }

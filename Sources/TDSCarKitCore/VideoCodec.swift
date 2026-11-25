@@ -67,10 +67,10 @@ public struct VideoParameterSets: Equatable, Sendable {
 
     /// RFC 6381 codec string for MSE / WebCodecs.
     public func codecString() throws -> String {
-        guard let sps else { throw ProtocolError.malformed("缺少 SPS") }
+        guard let sps else { throw ProtocolError.malformed(CWL("缺少 SPS")) }
         switch codec {
         case .h264:
-            guard sps.count >= 4 else { throw ProtocolError.malformed("H.264 SPS 过短") }
+            guard sps.count >= 4 else { throw ProtocolError.malformed(CWL("H.264 SPS 过短")) }
             return String(format: "avc1.%02X%02X%02X", sps.byte(1), sps.byte(2), sps.byte(3))
         case .h265:
             let p = try HEVCProfile(sps: sps)
@@ -95,17 +95,17 @@ public struct VideoParameterSets: Equatable, Sendable {
 
     /// avcC (H.264) or hvcC (H.265) decoder configuration record with 4-byte NAL lengths.
     public func decoderConfigurationRecord() throws -> Data {
-        guard isComplete, let sps, let pps else { throw ProtocolError.malformed("参数集不完整") }
-        for unit in ordered where unit.count > 0xffff { throw ProtocolError.malformed("参数集过大") }
+        guard isComplete, let sps, let pps else { throw ProtocolError.malformed(CWL("参数集不完整")) }
+        for unit in ordered where unit.count > 0xffff { throw ProtocolError.malformed(CWL("参数集过大")) }
         var record = Data()
         switch codec {
         case .h264:
-            guard sps.count >= 4 else { throw ProtocolError.malformed("H.264 SPS 过短") }
+            guard sps.count >= 4 else { throw ProtocolError.malformed(CWL("H.264 SPS 过短")) }
             record.append(contentsOf: [1, sps.byte(1), sps.byte(2), sps.byte(3), 0xff, 0xe1])
             record.putBE16(UInt16(sps.count)); record.append(sps)
             record.append(1); record.putBE16(UInt16(pps.count)); record.append(pps)
         case .h265:
-            guard let vps else { throw ProtocolError.malformed("缺少 VPS") }
+            guard let vps else { throw ProtocolError.malformed(CWL("缺少 VPS")) }
             let p = try HEVCProfile(sps: sps)
             record.append(1)
             record.append(p.profileSpace << 6 | (p.tier ? 0x20 : 0) | (p.profileIDC & 0x1f))
@@ -154,7 +154,7 @@ struct HEVCProfile {
             rbsp.append(byte); zeros = byte == 0 ? zeros + 1 : 0
         }
         // 2-byte NAL header, 1 byte vps_id/max_sub_layers/temporal_id_nesting, then 12-byte PTL.
-        guard rbsp.count >= 15 else { throw ProtocolError.malformed("H.265 SPS 过短") }
+        guard rbsp.count >= 15 else { throw ProtocolError.malformed(CWL("H.265 SPS 过短")) }
         let maxSubLayersMinus1 = Int((rbsp[2] >> 1) & 7)
         temporalLayers = UInt8(maxSubLayersMinus1 + 1)
         temporalIDNested = rbsp[2] & 1 != 0

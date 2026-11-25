@@ -32,7 +32,7 @@ final class CarLinkRelay {
         let candidate = NWConnection(host: NWEndpoint.Host(host), port: endpointPort,
                                      using: NWParameters(tls: nil, tcp: tcp))
         connection = candidate
-        onState?("正在连接 CarLink 中继…")
+        onState?(CWL("正在连接 CarLink 中继…"))
         candidate.stateUpdateHandler = { [weak self, weak candidate] state in
             guard let self, let candidate, self.connection === candidate else { return }
             switch state {
@@ -40,14 +40,14 @@ final class CarLinkRelay {
                 self.sendJSON(["type": "hello", "version": 0, "role": "producer", "name": "CarWithin", "client": "default"])
                 self.receive(candidate)
             case .failed(let error):
-                self.fail("CarLink 中继连接失败：\(error.localizedDescription)")
+                self.fail(CWL("CarLink 中继连接失败：{1}", [String(describing: error.localizedDescription)]))
             default: break
             }
         }
         candidate.start(queue: queue)
         queue.asyncAfter(deadline: .now() + 8) { [weak self, weak candidate] in
             guard let self, let candidate, self.connection === candidate, !self.ready else { return }
-            self.fail("连接 CarLink 中继超时，请检查中继地址及运行状态。")
+            self.fail(CWL("连接 CarLink 中继超时，请检查中继地址及运行状态。"))
         }
     }
 
@@ -131,14 +131,14 @@ final class CarLinkRelay {
             if let bytes { self.input.append(bytes) }
             while self.input.count >= 4 {
                 let size = self.input.prefix(4).enumerated().reduce(0) { $0 | (Int($1.element) << ($1.offset * 8)) }
-                guard (1...65_536).contains(size) else { self.fail("CarLink 中继消息长度无效"); return }
+                guard (1...65_536).contains(size) else { self.fail(CWL("CarLink 中继消息长度无效")); return }
                 guard self.input.count >= 4 + size else { break }
                 let body = Data(self.input.dropFirst(4).prefix(size))
                 self.input.removeFirst(4 + size)
                 self.handle(body)
                 guard self.connection === candidate else { return }
             }
-            if done || error != nil { self.fail("CarLink 中继已断开。请启动中继后重新开始 CarPlay。") }
+            if done || error != nil { self.fail(CWL("CarLink 中继已断开。请启动中继后重新开始 CarPlay。")) }
             else { self.receive(candidate) }
         }
     }
@@ -149,18 +149,18 @@ final class CarLinkRelay {
            let type = json["type"] as? String {
             if !ready {
                 guard type == "hello", json["version"] as? Int == 0, json["role"] as? String == "consumer" else {
-                    fail("CarLink 中继握手无效"); return
+                    fail(CWL("CarLink 中继握手无效")); return
                 }
                 ready = true
                 sendJSON(["type": "session", "session": ["id": "1", "phase": "ACTIVE"]])
-                onState?("中继已连接，等待车机配对或投屏。")
+                onState?(CWL("中继已连接，等待车机配对或投屏。"))
                 onKeyframe?()
             } else if type == "keyframe" || type == "restart" {
                 waitingForKeyframe = true
                 onKeyframe?()
             } else if type == "error" {
-                let detail = (json["message"] as? String).map { String($0.prefix(100)) } ?? "请查看中继日志"
-                fail("CarLink 中继出错：\(detail)")
+                let detail = (json["message"] as? String).map { String($0.prefix(100)) } ?? CWL("请查看中继日志")
+                fail(CWL("CarLink 中继出错：{1}", [String(describing: detail)]))
             }
             return
         }
@@ -206,7 +206,7 @@ final class CarLinkRelay {
             guard let self, let candidate, self.connection === candidate else { return }
             let previouslyQueued = self.pendingBytes
             self.pendingBytes -= count
-            if let error { self.fail("CarLink 中继发送失败：\(error.localizedDescription)") }
+            if let error { self.fail(CWL("CarLink 中继发送失败：{1}", [String(describing: error.localizedDescription)])) }
             else if self.waitingForKeyframe && (self.pendingBytes == 0 ||
                         previouslyQueued >= self.maximumQueuedBytes / 2 && self.pendingBytes < self.maximumQueuedBytes / 2) {
                 self.onKeyframe?()

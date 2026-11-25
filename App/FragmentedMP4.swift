@@ -115,7 +115,7 @@ enum FragmentedMP4 {
 
     private enum MP4Error: LocalizedError {
         case invalidFormat
-        var errorDescription: String? { "无法生成浏览器所需的 MP4 视频配置" }
+        var errorDescription: String? { CWL("无法生成浏览器所需的 MP4 视频配置") }
     }
 }
 
@@ -131,7 +131,9 @@ final class CarPlayHLS {
     }
 
     let id: UUID
+    private let baseURL: String
     private var initialization: Data?
+    private var codecString: String?
     private var segments: [Segment] = []
     private var pending = Data()
     private var pendingFrames = 0
@@ -141,20 +143,27 @@ final class CarPlayHLS {
     private var decodeTime: UInt64 = 0
     private var requestedAt: UInt64 = 0
     private var announced = false
+    private var previousArrivalUs: UInt64?
     private var formatGeneration = 0
 
-    init(id: UUID) { self.id = id }
+    init(id: UUID, origin: String) {
+        self.id = id
+        baseURL = "\(origin)/airplay/\(id.uuidString)"
+    }
 
     func append(sample: Data, keyframe: Bool, format: FragmentedMP4.Format, arrivalUs: UInt64) -> Event {
         if initialization != format.initializationSegment {
             if initialization != nil { formatGeneration += 1 }
             discardPending()
             initialization = format.initializationSegment
+            codecString = format.codecString
             segments.removeAll()
+            announced = false
+            previousArrivalUs = nil
         }
         if keyframe, pendingFrames > 0 {
             segments.append(Segment(number: segmentNumber,
-                duration: Double(pendingFrames) * Double(format.sampleDuration) / Double(format.timescale), data: pending))
+                duration: Double(pendingDuration) / Double(format.timescale), data: pending))
             segmentNumber += 1
             while segments.count > 12 || segments.reduce(0, { $0 + $1.data.count }) > 32 * 1024 * 1024 {
                 segments.removeFirst()
@@ -162,12 +171,20 @@ final class CarPlayHLS {
             pending = Data(); pendingFrames = 0; pendingDuration = 0
         }
         if keyframe || pendingFrames > 0 {
+            // CarPlay is variable-rate (especially on static screens). Counting every
+            // sample as 1/maxFPS compresses real time and drains a live player's buffer.
+            let elapsedUs = previousArrivalUs.flatMap { arrivalUs >= $0 ? arrivalUs - $0 : nil }
+            let duration = elapsedUs.map {
+                UInt32(max(1, min(Double(format.timescale) * 3,
+                    (Double($0) * Double(format.timescale) / 1_000_000).rounded())))
+            } ?? format.sampleDuration
+            previousArrivalUs = arrivalUs
             let fragment = FragmentedMP4.fragment(sequence: sequence, decodeTime: decodeTime,
-                duration: format.sampleDuration, accessUnit: sample, keyframe: keyframe)
+                duration: duration, accessUnit: sample, keyframe: keyframe)
             pending.append(fragment); pendingFrames += 1
             sequence &+= 1
-            pendingDuration += UInt64(format.sampleDuration)
-            decodeTime += UInt64(format.sampleDuration)
+            pendingDuration += UInt64(duration)
+            decodeTime += UInt64(duration)
             if pending.count > 8 * 1024 * 1024 || pendingDuration > UInt64(Self.targetDuration) * UInt64(format.timescale) {
                 discardPending()
             }
@@ -176,7 +193,7 @@ final class CarPlayHLS {
             announced = true
             return .ready
         }
-        let duration = Double(pendingFrames) * Double(format.sampleDuration) / Double(format.timescale)
+        let duration = Double(pendingDuration) / Double(format.timescale)
         if (duration >= 1 || pendingFrames == 0), arrivalUs - requestedAt >= 1_000_000 {
             requestedAt = arrivalUs
             return .keyframeNeeded
@@ -193,13 +210,18 @@ final class CarPlayHLS {
         let prefix = "/airplay/\(id.uuidString)/"
         guard path.hasPrefix(prefix) else { return nil }
         let tail = path.dropFirst(prefix.count)
+        if tail == "master.m3u8", let codecString, !segments.isEmpty {
+            let bandwidth = segments.map { Int(ceil(Double($0.data.count * 8) / $0.duration)) }.max() ?? 0
+            let text = "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-STREAM-INF:BANDWIDTH=\(max(20_000_000, bandwidth)),CODECS=\"\(codecString)\"\n\(baseURL)/index.m3u8\n"
+            return ("application/vnd.apple.mpegurl", Data(text.utf8))
+        }
         if tail == "index.m3u8", let first = segments.first {
             var text = "#EXTM3U\n#EXT-X-VERSION:7\n#EXT-X-INDEPENDENT-SEGMENTS\n#EXT-X-TARGETDURATION:\(Self.targetDuration)\n"
             text += "#EXT-X-MEDIA-SEQUENCE:\(first.number)\n#EXT-X-DISCONTINUITY-SEQUENCE:\(formatGeneration)\n"
-            text += "#EXT-X-MAP:URI=\"init-\(formatGeneration).mp4\"\n"
+            text += "#EXT-X-MAP:URI=\"\(baseURL)/init-\(formatGeneration).mp4\"\n"
             for segment in segments {
                 text += String(format: "#EXTINF:%.3f,\n", locale: Locale(identifier: "en_US_POSIX"), segment.duration)
-                text += "\(segment.number).m4s\n"
+                text += "\(baseURL)/\(segment.number).m4s\n"
             }
             return ("application/vnd.apple.mpegurl", Data(text.utf8))
         }

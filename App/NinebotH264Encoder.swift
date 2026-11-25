@@ -104,7 +104,8 @@ final class H264Encoder {
     private let callbackBox = H264CallbackBox()
     private let fps: Int
 
-    init(width: Int, height: Int, fps: Int, bitrate: Int, output: @escaping (Result<H264EncodedFrame, Error>) -> Void) throws {
+    init(width: Int, height: Int, fps: Int, bitrate: Int, profileLevel: CFString = kVTProfileLevel_H264_Baseline_AutoLevel,
+         output: @escaping (Result<H264EncodedFrame, Error>) -> Void) throws {
         self.fps = fps
         callbackBox.handler = output
 
@@ -137,7 +138,7 @@ final class H264Encoder {
         guard status == noErr, let created else { throw H264EncoderError.create(status) }
         session = created
         do {
-            try configure(created, bitrate: bitrate)
+            try configure(created, bitrate: bitrate, profileLevel: profileLevel)
         } catch {
             VTCompressionSessionInvalidate(created)
             session = nil
@@ -145,11 +146,11 @@ final class H264Encoder {
         }
     }
 
-    private func configure(_ created: VTCompressionSession, bitrate: Int) throws {
+    private func configure(_ created: VTCompressionSession, bitrate: Int, profileLevel: CFString) throws {
         do {
             try set(kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
             try set(kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
-            try set(kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_Baseline_AutoLevel)
+            try set(kVTCompressionPropertyKey_ProfileLevel, value: profileLevel)
             try set(kVTCompressionPropertyKey_AverageBitRate, value: bitrate as CFNumber)
             try set(kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
             // 关键帧节奏由 MirrorSession 每 0.5 秒强制请求（与官方 iOS 抓包、Android 版一致）；
@@ -222,17 +223,17 @@ enum H264EncoderError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .frameDropped: "编码器丢弃了一帧"
-        case .create(let code): "无法创建 H.264 编码器（\(code)）"
-        case .property(let key, let code): "编码器不接受参数 \(key)（\(code)）"
-        case .prepare(let code): "H.264 编码器准备失败（\(code)）"
-        case .encode(let code): "提交 H.264 帧失败（\(code)）"
-        case .compression(let code): "H.264 压缩失败（\(code)）"
-        case .blockCopy(let code): "读取 H.264 输出失败（\(code)）"
-        case .missingSampleBuffer: "编码器没有返回有效帧"
-        case .missingBlockBuffer: "编码器输出缺少数据块"
-        case .missingParameterSets: "H.264 关键帧缺少 SPS/PPS"
-        case .invalidated: "H.264 编码器已停止"
+        case .frameDropped: CWL("编码器丢弃了一帧")
+        case .create(let code): CWL("无法创建 H.264 编码器（{1}）", [String(describing: code)])
+        case .property(let key, let code): CWL("编码器不接受参数 {1}（{2}）", [String(describing: key), String(describing: code)])
+        case .prepare(let code): CWL("H.264 编码器准备失败（{1}）", [String(describing: code)])
+        case .encode(let code): CWL("提交 H.264 帧失败（{1}）", [String(describing: code)])
+        case .compression(let code): CWL("H.264 压缩失败（{1}）", [String(describing: code)])
+        case .blockCopy(let code): CWL("读取 H.264 输出失败（{1}）", [String(describing: code)])
+        case .missingSampleBuffer: CWL("编码器没有返回有效帧")
+        case .missingBlockBuffer: CWL("编码器输出缺少数据块")
+        case .missingParameterSets: CWL("H.264 关键帧缺少 SPS/PPS")
+        case .invalidated: CWL("H.264 编码器已停止")
         }
     }
 }

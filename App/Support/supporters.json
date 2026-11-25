@@ -1,0 +1,213 @@
+{
+  "schema_version": 2,
+  "revision": 2026112402,
+  "updated_at": "2026-11-24",
+  "supporters": [
+    {
+      "id": "s0001",
+      "name": "**栋",
+      "color": "green"
+    },
+    {
+      "id": "s0002",
+      "name": "*超",
+      "color": "standard"
+    },
+    {
+      "id": "s0003",
+      "name": "**华",
+      "color": "standard"
+    },
+    {
+      "id": "s0004",
+      "name": "**栋",
+      "color": "standard"
+    },
+    {
+      "id": "s0005",
+      "name": "**亮",
+      "color": "standard"
+    },
+    {
+      "id": "s0006",
+      "name": "**烛",
+      "color": "standard"
+    },
+    {
+      "id": "s0010",
+      "name": "**荣",
+      "color": "standard"
+    },
+    {
+      "id": "s0011",
+      "name": "**晨",
+      "color": "standard"
+    },
+    {
+      "id": "s0012",
+      "name": "**生",
+      "color": "blue"
+    },
+    {
+      "id": "s0013",
+      "name": "**宇",
+      "color": "blue"
+    },
+    {
+      "id": "s0014",
+      "name": "**飞",
+      "color": "standard"
+    },
+    {
+      "id": "s0015",
+      "name": "**成",
+      "color": "green"
+    },
+    {
+      "id": "s0016",
+      "name": "*乐",
+      "color": "standard"
+    },
+    {
+      "id": "s0017",
+      "name": "**岷",
+      "color": "green"
+    },
+    {
+      "id": "s0018",
+      "name": "**燊",
+      "color": "green"
+    },
+    {
+      "id": "s0020",
+      "name": "**明",
+      "color": "blue"
+    },
+    {
+      "id": "s0021",
+      "name": "**旭",
+      "color": "standard"
+    },
+    {
+      "id": "s0022",
+      "name": "**志",
+      "color": "green"
+    },
+    {
+      "id": "s0023",
+      "name": "**超",
+      "color": "green"
+    },
+    {
+      "id": "s0025",
+      "name": "**洁",
+      "color": "blue"
+    },
+    {
+      "id": "s0027",
+      "name": "**杰",
+      "color": "green"
+    },
+    {
+      "id": "s0028",
+      "name": "*定",
+      "color": "green"
+    },
+    {
+      "id": "s0029",
+      "name": "**芳",
+      "color": "gold"
+    },
+    {
+      "id": "s0031",
+      "name": "*凡",
+      "color": "gold"
+    },
+    {
+      "id": "s0033",
+      "name": "**雷",
+      "color": "standard"
+    },
+    {
+      "id": "s0035",
+      "name": "*健",
+      "color": "green"
+    },
+    {
+      "id": "s0036",
+      "name": "**良",
+      "color": "green"
+    },
+    {
+      "id": "s0039",
+      "name": "**飞",
+      "color": "green"
+    },
+    {
+      "id": "s0042",
+      "name": "**凡",
+      "color": "purple"
+    },
+    {
+      "id": "s0043",
+      "name": "**铭",
+      "color": "green"
+    },
+    {
+      "id": "s0044",
+      "name": "**圩",
+      "color": "standard"
+    },
+    {
+      "id": "s0045",
+      "name": "**岑",
+      "color": "standard"
+    },
+    {
+      "id": "s0046",
+      "name": "*涛",
+      "color": "blue"
+    },
+    {
+      "id": "s0047",
+      "name": "**阳",
+      "color": "standard"
+    },
+    {
+      "id": "s0048",
+      "name": "**庆",
+      "color": "standard"
+    },
+    {
+      "id": "s0049",
+      "name": "*晨",
+      "color": "blue"
+    },
+    {
+      "id": "s0050",
+      "name": "带你去看海",
+      "color": "gold"
+    },
+    {
+      "id": "s0051",
+      "name": "正美旅行🤿海岛潜水 Ryan",
+      "color": "green"
+    },
+    {
+      "id": "s0052",
+      "name": "z",
+      "color": "standard"
+    },
+    {
+      "id": "s0053",
+      "name": "Romeo",
+      "color": "gold"
+    },
+    {
+      "id": "s0054",
+      "name": "别说真心话.",
+      "color": "standard"
+    }
+  ],
+  "contributors": []
+}

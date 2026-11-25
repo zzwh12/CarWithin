@@ -1,6 +1,6 @@
 # CarWithin iOS 更新协议
 
-本协议于开发版 1.0.1（12）接入，已随正式版 1.0.1（13）发布，并提供配套 ios-update.json。未公开发布时只更新版本号、保留构建号；准备正式发布时再递增构建号并生成清单。
+本协议于开发版 1.0.1（12）接入，已随正式版 1.0.1（13）发布，并提供配套 ios-update.json。日常开发保持应用版本号和构建号不变。准备正式发布时，未指定版本则末位版本号与构建号各加 1；用户指定版本号时按要求设置，构建号仍保持全局递增。先更新本地 `App/Info.plist`，再从同一份源码打包并生成清单。同一轮发布重打包或重试上传不重复递增；已公开的版本不覆盖、不回退。详细规则见 [AGENTS.md](AGENTS.md)。
 
 ## 发现与比较
 
@@ -47,3 +47,16 @@ xcrun swiftc -parse-as-library App/AppReleaseService.swift Tools/UpdateSmoke.swi
 ```
 
 覆盖 JSON 发现、产品和附件一致性、仅构建号排序、按构建忽略、检查间隔、缺失清单，以及浏览历史不读取统计清单。使用模拟响应，不修改线上发布。
+
+## 英文更新说明（2026-11-24）
+
+清单新增可选字符串 `notesEn`，`schemaVersion` 继续为 1。`notes` 仍为非空中文说明，旧客户端忽略新增字段。新版 App 根据当前 App 语言选择说明：英文优先使用非空 `notesEn`，缺失或空白回退 `notes`；中文始终使用 `notes`。不改变构建号比较与附件校验。
+
+生成时可追加 `--notes-en /absolute/path/update-notes.en.md`；未指定时不输出该字段。GitHub Release 正文保持中文。历史页面及展开的完整发布说明仍直接显示原始 Release Markdown，不额外下载各版本 JSON。
+
+本地更新回归命令需同时编译语言支持文件：
+
+```sh
+xcrun swiftc -parse-as-library Sources/TDSCarKitCore/Localization.swift App/AppReleaseService.swift Tools/UpdateSmoke.swift -o /tmp/carwithin-update-smoke
+/tmp/carwithin-update-smoke
+```

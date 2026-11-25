@@ -58,7 +58,7 @@ final class CarPlayPictureInPicture: NSObject {
               !isStarting, !isActive, !awaitingSystemStart, surface.isReadyForPictureInPicture else { return }
         waitingForReadiness = false
         awaitingSystemStart = true
-        setStartDeadline(after: 4, message: "iOS 未自动开启画中画，请检查系统的自动画中画设置")
+        setStartDeadline(after: 4, message: CWL("iOS 未自动开启画中画，请检查系统的自动画中画设置"))
     }
 
     func returnedToForeground() {
@@ -76,14 +76,14 @@ final class CarPlayPictureInPicture: NSObject {
     @discardableResult
     func start() -> Bool {
         guard controller != nil else {
-            onLog?("当前设备不支持系统画中画")
+            onLog?(CWL("当前设备不支持系统画中画"))
             return false
         }
         guard !isActive, !isStarting, !waitingForReadiness else { return true }
         acceptsStarts = true
         prepareAudioSession()
         waitingForReadiness = true
-        setStartDeadline(after: 6, message: "画中画未就绪：系统尚未允许启动或首帧未渲染")
+        setStartDeadline(after: 6, message: CWL("画中画未就绪：系统尚未允许启动或首帧未渲染"))
         sourceMayBeReady()
         return true
     }
@@ -93,7 +93,7 @@ final class CarPlayPictureInPicture: NSObject {
               controller.isPictureInPicturePossible, UIApplication.shared.applicationState == .active else { return }
         waitingForReadiness = false
         isStarting = true
-        setStartDeadline(after: 4, message: "系统画中画 4 秒内没有启动")
+        setStartDeadline(after: 4, message: CWL("系统画中画 4 秒内没有启动"))
         controller.startPictureInPicture()
     }
 
@@ -106,7 +106,7 @@ final class CarPlayPictureInPicture: NSObject {
             }
             try session.setActive(true)
         } catch {
-            onLog?("画中画音频会话准备失败：\(error.localizedDescription)")
+            onLog?(CWL("画中画音频会话准备失败：{1}", [String(describing: error.localizedDescription)]))
         }
         #endif
     }
@@ -150,7 +150,7 @@ extension CarPlayPictureInPicture: AVPictureInPictureControllerDelegate {
         waitingForReadiness = false
         awaitingSystemStart = false
         isStarting = true
-        setStartDeadline(after: 4, message: "系统画中画 4 秒内没有启动")
+        setStartDeadline(after: 4, message: CWL("系统画中画 4 秒内没有启动"))
     }
 
     func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
@@ -159,21 +159,21 @@ extension CarPlayPictureInPicture: AVPictureInPictureControllerDelegate {
             pictureInPictureController.stopPictureInPicture()
             return
         }
-        onLog?("系统画中画已开启")
+        onLog?(CWL("系统画中画已开启"))
     }
 
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController,
                                     failedToStartPictureInPictureWithError error: Error) {
         clearStartState()
         guard acceptsStarts else { return }
-        onLog?("系统画中画启动失败：\(error.localizedDescription)")
+        onLog?(CWL("系统画中画启动失败：{1}", [String(describing: error.localizedDescription)]))
         onFailure?()
     }
 
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
         clearStartState()
         guard acceptsStarts else { return }
-        onLog?("系统画中画已关闭")
+        onLog?(CWL("系统画中画已关闭"))
         onStopped?()
     }
 

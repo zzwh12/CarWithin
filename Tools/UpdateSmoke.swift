@@ -40,6 +40,20 @@ struct UpdateSmoke {
         let latest = try await service.latest()
         assert(latest.update?.notes == "Short summary" && latest.body == "Full release notes")
         assert(latest.ipa?.sha256 == checksum)
+        assert(latest.update?.localizedNotes(english: true) == "Short summary")
+        manifest["notesEn"] = "English summary"
+        try publish()
+        let bilingual = try await service.latest()
+        assert(bilingual.update?.localizedNotes(english: true) == "English summary")
+        assert(bilingual.update?.localizedNotes(english: false) == "Short summary")
+        manifest["notesEn"] = "  \n "
+        try publish()
+        let blankEnglish = try await service.latest()
+        assert(blankEnglish.update?.localizedNotes(english: true) == "Short summary")
+        manifest.removeValue(forKey: "notesEn")
+        try publish()
+        UpdateStub.requests.removeAll()
+        _ = try await service.latest()
         let suite = "CarWithin.UpdateSmoke." + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }

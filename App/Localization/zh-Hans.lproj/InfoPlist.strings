@@ -1,0 +1,8 @@
+"NSBluetoothAlwaysUsageDescription" = "CarWithin 使用蓝牙发现并连接 CarPlay 设备；开启 BMS 读取后，连接你选择的蚂蚁 ANT BMS 并读取电池实时信息。";
+"NSLocalNetworkUsageDescription" = "CarWithin 需要访问本地网络，以接收 CarPlay 音视频，并在你选择时把画面或声音发送给局域网接收设备。";
+"NSLocationWhenInUseUsageDescription" = "CarWithin 仅使用定位权限读取当前 Wi-Fi 名称，不会收集位置坐标。";
+"NSMicrophoneUsageDescription" = "CarWithin 需要使用麦克风，将 Siri 和通话语音传回 iPhone。";
+
+
+"NSPhotoLibraryAddUsageDescription" = "仅在你选择保存收款码时，将图片添加到相册，不读取相册内容。";
+"NSCameraUsageDescription" = "CarWithin 使用相机在本机读取亿连车机的连接二维码。";

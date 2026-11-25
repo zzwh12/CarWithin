@@ -35,33 +35,33 @@ final class BLEBootstrap: NSObject, CBPeripheralManagerDelegate, StreamDelegate 
         guard active, peripheral === manager else { return }
         switch peripheral.state {
         case .poweredOn: peripheral.publishL2CAPChannel(withEncryption: false)
-        case .unauthorized: fail("蓝牙权限被拒绝。请在系统隐私设置中为 TDS Car Kit 开启蓝牙权限。")
-        case .unsupported: fail("当前运行环境不支持蓝牙外设模式/L2CAP。")
-        case .poweredOff: onLog?("请开启蓝牙以广播接收端。")
-        default: onLog?("蓝牙状态：\(peripheral.state.rawValue)")
+        case .unauthorized: fail(CWL("蓝牙权限被拒绝。请在系统隐私设置中为 TDS Car Kit 开启蓝牙权限。"))
+        case .unsupported: fail(CWL("当前运行环境不支持蓝牙外设模式/L2CAP。"))
+        case .poweredOff: onLog?(CWL("请开启蓝牙以广播接收端。"))
+        default: onLog?(CWL("蓝牙状态：{1}", [String(describing: peripheral.state.rawValue)]))
         }
     }
     func peripheralManager(_ peripheral: CBPeripheralManager, didPublishL2CAPChannel PSM: CBL2CAPPSM, error: Error?) {
         guard active, peripheral === manager else { return }
-        if let error { fail("L2CAP 通道发布失败", error: error); return }
+        if let error { fail(CWL("L2CAP 通道发布失败"), error: error); return }
         psm = PSM
         let value = CBMutableCharacteristic(type: psmID, properties: [.read, .notify], value: nil, permissions: [.readable])
         characteristic = value
         let service = CBMutableService(type: serviceID, primary: true); service.characteristics = [value]
-        onLog?("正在注册蓝牙服务 \(serviceID.uuidString)（\(serviceID.data.count) 字节 UUID）")
+        onLog?(CWL("正在注册蓝牙服务 {1}（{2} 字节 UUID）", [String(describing: serviceID.uuidString), String(describing: serviceID.data.count)]))
         peripheral.add(service)
-        onLog?("蓝牙控制通道已发布（PSM \(PSM)）")
+        onLog?(CWL("蓝牙控制通道已发布（PSM {1}）", [String(describing: PSM)]))
     }
     func peripheralManager(_ peripheral: CBPeripheralManager, didAdd service: CBService, error: Error?) {
         guard active, peripheral === manager, let configuration else { return }
-        if let error { fail("蓝牙服务 \(service.uuid.uuidString) 注册失败", error: error); return }
-        onLog?("蓝牙服务已注册，正在广播 \(advertisedServiceID.uuidString)")
+        if let error { fail(CWL("蓝牙服务 {1} 注册失败", [String(describing: service.uuid.uuidString)]), error: error); return }
+        onLog?(CWL("蓝牙服务已注册，正在广播 {1}", [String(describing: advertisedServiceID.uuidString)]))
         peripheral.startAdvertising([CBAdvertisementDataServiceUUIDsKey: [advertisedServiceID], CBAdvertisementDataLocalNameKey: configuration.name])
     }
     func peripheralManagerDidStartAdvertising(_ peripheral: CBPeripheralManager, error: Error?) {
         guard active, peripheral === manager else { return }
-        if let error { fail("广播失败", error: error); return }
-        onLog?("正在通过蓝牙广播原生接收端")
+        if let error { fail(CWL("广播失败"), error: error); return }
+        onLog?(CWL("正在通过蓝牙广播原生接收端"))
         onAdvertising?()
     }
     private func fail(_ message: String, error: Error? = nil) {
@@ -88,13 +88,13 @@ final class BLEBootstrap: NSObject, CBPeripheralManagerDelegate, StreamDelegate 
     }
     func peripheralManager(_ peripheral: CBPeripheralManager, didOpen channel: CBL2CAPChannel?, error: Error?) {
         guard active, peripheral === manager else { return }
-        if let error { onLog?("L2CAP 打开失败：\(error.localizedDescription)"); return }
+        if let error { onLog?(CWL("L2CAP 打开失败：{1}", [String(describing: error.localizedDescription)])); return }
         guard let channel else { return }
         closeChannel(); self.channel = channel
         for stream: Stream in [channel.inputStream, channel.outputStream] {
             stream.delegate = self; stream.schedule(in: .main, forMode: .common); stream.open()
         }
-        onLog?("iPhone 已打开蓝牙控制通道")
+        onLog?(CWL("iPhone 已打开蓝牙控制通道"))
         sendIdentification()
     }
     private func closeChannel() {
@@ -127,16 +127,16 @@ final class BLEBootstrap: NSObject, CBPeripheralManagerDelegate, StreamDelegate 
     private func send(type: UInt16, dictionary: [String: OPACKValue]) {
         do {
             let data = try BLEFrame(type: type, payload: OPACK.encode(.dictionary(dictionary))).encoded()
-            guard pending.count + data.count <= 131072 else { throw ProtocolError.limitExceeded("BLE 输出队列") }
+            guard pending.count + data.count <= 131072 else { throw ProtocolError.limitExceeded(CWL("BLE 输出队列")) }
             pending.append(data); flush()
-            onLog?("已发送 BLE 消息 \(type)（\(data.count) 字节）")
-        } catch { onLog?("蓝牙编码失败：\(error)"); closeChannel() }
+            onLog?(CWL("已发送 BLE 消息 {1}（{2} 字节）", [String(describing: type), String(describing: data.count)]))
+        } catch { onLog?(CWL("蓝牙编码失败：{1}", [String(describing: error)])); closeChannel() }
     }
     private func flush() {
         guard let output = channel?.outputStream else { return }
         while !pending.isEmpty, output.hasSpaceAvailable {
             let count = pending.withUnsafeBytes { output.write($0.bindMemory(to: UInt8.self).baseAddress!, maxLength: min(4096, pending.count)) }
-            if count < 0 { onLog?("蓝牙写入失败"); closeChannel(); return }
+            if count < 0 { onLog?(CWL("蓝牙写入失败")); closeChannel(); return }
             if count == 0 { return }
             pending = Data(pending.dropFirst(count))
         }
@@ -152,13 +152,13 @@ final class BLEBootstrap: NSObject, CBPeripheralManagerDelegate, StreamDelegate 
                 if count <= 0 { if count < 0 { closeChannel() }; return }
                 do {
                     for frame in try parser.append(Data(bytes.prefix(count))) {
-                        onLog?("收到 BLE 消息 \(frame.type)（\(frame.payload.count) 字节）")
+                        onLog?(CWL("收到 BLE 消息 {1}（{2} 字节）", [String(describing: frame.type), String(describing: frame.payload.count)]))
                         // Message type 2 requests StartSession.
                         if frame.type == 2 { sendStartSession() }
                     }
-                } catch { onLog?("蓝牙帧被拒绝：\(error)"); closeChannel(); return }
+                } catch { onLog?(CWL("蓝牙帧被拒绝：{1}", [String(describing: error)])); closeChannel(); return }
             }
-        case .errorOccurred, .endEncountered: onLog?("蓝牙控制通道已关闭"); closeChannel()
+        case .errorOccurred, .endEncountered: onLog?(CWL("蓝牙控制通道已关闭")); closeChannel()
         default: break
         }
     }

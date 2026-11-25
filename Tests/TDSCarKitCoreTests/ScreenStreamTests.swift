@@ -17,7 +17,8 @@ final class ScreenStreamTests: XCTestCase {
         let plain = Data([0, 0, 0, 3, 0x65, 0x88, 0x99])
         let head = header(plain.count + 16, opcode: 0)
         let box = try ChaChaPoly.seal(plain, using: key, nonce: .init(data: Data(count: 12)), authenticating: head)
-        let wire = header(config.count, opcode: 1) + config + head + box.ciphertext + box.tag
+        let emptyConfiguration = header(0, opcode: 1)
+        let wire = emptyConfiguration + header(config.count, opcode: 1) + config + emptyConfiguration + head + box.ciphertext + box.tag
         var output: [Data] = []
         for offset in stride(from: 0, to: wire.count, by: 13) { output += try receiver.append(Data(wire.dropFirst(offset).prefix(13))) }
         XCTAssertEqual(output, [Data([0,0,0,1,0x67,1,0,0,0,1,0x68,2]), Data([0,0,0,1,0x65,0x88,0x99])])

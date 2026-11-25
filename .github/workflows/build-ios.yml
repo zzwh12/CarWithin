@@ -25,7 +25,11 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/DerivedData" CODE_SIGNING_ALLOWED=NO build
 
       - name: Test projection protocol
-        run: bash Tools/test_tailing.sh
+        run: |
+          python3 Tools/verify_legacy62.py
+          bash Tools/test_zeeho_control.sh
+          bash Tools/test_zeeho_seplus.sh
+          bash Tools/test_tailing.sh
 
       - name: Package unsigned IPA
         run: |

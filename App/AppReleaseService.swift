@@ -54,6 +54,13 @@ struct IOSUpdateMetadata: Codable, Sendable {
     let size: Int64
     let sha256: String
     let notes: String
+    var notesEn: String? = nil
+
+    func localizedNotes(english: Bool = CarWithinLanguage.isEnglish) -> String {
+        guard english, let translated = notesEn?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !translated.isEmpty else { return notes }
+        return translated
+    }
 
     func validate(for release: AppRelease) throws {
         var specifiedRelease = release
@@ -88,14 +95,14 @@ enum ReleaseError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .missing: return "GitHub 暂无公开版本。"
-        case .missingMetadata: return "当前公开版本尚未提供 ios-update.json，请在 GitHub 查看发布记录。"
-        case .invalid: return "版本信息无效，请查看 GitHub 发布记录。"
+        case .missing: return CWL("GitHub 暂无公开版本。")
+        case .missingMetadata: return CWL("当前公开版本尚未提供 ios-update.json，请在 GitHub 查看发布记录。")
+        case .invalid: return CWL("版本信息无效，请查看 GitHub 发布记录。")
         case .response(let status) where status == 403 || status == 429:
-            return "GitHub 暂时限制了请求，请稍后重试。"
-        case .response(let status): return "服务器返回 \(status)，请稍后重试。"
-        case .checksum: return "文件校验失败，请重新下载。"
-        case .fileSize: return "下载文件大小异常，请重新下载。"
+            return CWL("GitHub 暂时限制了请求，请稍后重试。")
+        case .response(let status): return CWL("服务器返回 {1}，请稍后重试。", [String(describing: status)])
+        case .checksum: return CWL("文件校验失败，请重新下载。")
+        case .fileSize: return CWL("下载文件大小异常，请重新下载。")
         }
     }
 }

@@ -8,16 +8,16 @@ enum CarPlayControl: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .home: "主页"
-        case .back: "返回"
-        case .select: "选择"
-        case .knobPrevious: "上一项"
-        case .knobNext: "下一项"
-        case .previous: "上一曲"
-        case .playPause: "播放/暂停"
-        case .next: "下一曲"
+        case .home: CWL("主页")
+        case .back: CWL("返回")
+        case .select: CWL("选择")
+        case .knobPrevious: CWL("上一项")
+        case .knobNext: CWL("下一项")
+        case .previous: CWL("上一曲")
+        case .playPause: CWL("播放/暂停")
+        case .next: CWL("下一曲")
         case .siri: "Siri"
-        case .hookSwitch: "接听/挂断"
+        case .hookSwitch: CWL("接听/挂断")
         }
     }
 

@@ -15,7 +15,7 @@ private final class AudioDatagramPort {
         var receiveBuffer: Int32 = 512 * 1024
         setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &receiveBuffer, socklen_t(MemoryLayout<Int32>.size))
         var allowed = in_addr()
-        guard inet_pton(AF_INET, peerAddress, &allowed) == 1 else { close(fd); throw ProtocolError.malformed("音频对端地址") }
+        guard inet_pton(AF_INET, peerAddress, &allowed) == 1 else { close(fd); throw ProtocolError.malformed(CWL("音频对端地址")) }
         var address = sockaddr_in(); address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size); address.sin_family = sa_family_t(AF_INET)
         let bound = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
         guard bound == 0, fcntl(fd, F_SETFL, O_NONBLOCK) == 0 else { close(fd); throw POSIXError(.EIO) }
@@ -134,7 +134,7 @@ final class CarPlayAudio {
                     do {
                         try session.overrideOutputAudioPort(.speaker)
                         Self.hasSpeakerOverride = true
-                        onLog?("本机音频避开 CarPlay 路由，改用 iPhone 扬声器")
+                        onLog?(CWL("本机音频避开 CarPlay 路由，改用 iPhone 扬声器"))
                     } catch {
                         Self.deactivateSessionIfIdle()
                         throw error
@@ -161,9 +161,9 @@ final class CarPlayAudio {
                     DispatchQueue.main.async { microphone.start() }
                 }
                 firstTimestamp = packet.timestamp
-                onLog?("原生 \(format.name) 播放已开始：\(format.sampleRate) Hz，\(format.channels) 声道")
+                onLog?(CWL("原生 {1} 播放已开始：{2} Hz，{3} 声道", [String(describing: format.name), String(describing: format.sampleRate), String(describing: format.channels)]))
                 #if os(iOS)
-                onLog?("音频输出路由：\(AVAudioSession.sharedInstance().currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ", "))")
+                onLog?(CWL("音频输出路由：{1}", [String(describing: AVAudioSession.sharedInstance().currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ", "))]))
                 #endif
             }
             guard let player else { return }
@@ -185,12 +185,12 @@ final class CarPlayAudio {
             let now = ProcessInfo.processInfo.systemUptime
             if now >= nextStatistics {
                 nextStatistics = now + 5
-                onLog?("音频状态：数据包=\(packets)，队列=\(queuedFrames * 1000 / format.sampleRate)ms，欠载=\(underruns)，延迟=\(latePackets)，溢出=\(overflowPackets)，拒绝=\(rejected)")
+                onLog?(CWL("音频状态：数据包={1}，队列={2}ms，欠载={3}，延迟={4}，溢出={5}，拒绝={6}", [String(describing: packets), String(describing: queuedFrames * 1000 / format.sampleRate), String(describing: underruns), String(describing: latePackets), String(describing: overflowPackets), String(describing: rejected)]))
             }
 
         } catch {
             rejected += 1
-            if rejected <= 3 { onLog?("音频数据包被拒绝：\(error.localizedDescription)") }
+            if rejected <= 3 { onLog?(CWL("音频数据包被拒绝：{1}", [String(describing: error.localizedDescription)])) }
         }
     }
     private func browserTimestamp(_ rtp: UInt32, arrival: UInt64) -> UInt64 {
@@ -286,7 +286,7 @@ final class NativeAudioDecoder {
                 mFormatFlags: format.isOpus ? 0 : 2, mBytesPerPacket: 0, mFramesPerPacket: format.isOpus ? UInt32(format.sampleRate / 50) : 1024, mBytesPerFrame: 0,
                 mChannelsPerFrame: UInt32(format.channels), mBitsPerChannel: 0, mReserved: 0)
             guard let input = AVAudioFormat(streamDescription: &description), let codec = AVAudioConverter(from: input, to: output) else {
-                throw ProtocolError.malformed("\(format.name) 解码器不可用")
+                throw ProtocolError.malformed(CWL("{1} 解码器不可用", [String(describing: format.name)]))
             }
             if format.isAAC { codec.magicCookie = Data(format.sampleRate == 44100 ? [0x12, 0x10] : [0x11, 0x90]) }
             codec.primeMethod = .none
@@ -294,13 +294,13 @@ final class NativeAudioDecoder {
         }
     }
     func decode(_ payload: Data) throws -> AVAudioPCMBuffer? {
-        guard !payload.isEmpty, payload.count <= 65507 else { throw ProtocolError.malformed("音频载荷大小") }
+        guard !payload.isEmpty, payload.count <= 65507 else { throw ProtocolError.malformed(CWL("音频载荷大小")) }
         if let converter, let compressed {
             let input = AVAudioCompressedBuffer(format: compressed, packetCapacity: 1, maximumPacketSize: payload.count)
             input.packetCount = 1; input.byteLength = UInt32(payload.count)
             payload.withUnsafeBytes { input.data.copyMemory(from: $0.baseAddress!, byteCount: payload.count) }
             input.packetDescriptions?.pointee = AudioStreamPacketDescription(mStartOffset: 0, mVariableFramesInPacket: format.isOpus ? 0 : 1024, mDataByteSize: UInt32(payload.count))
-            guard let pcm = AVAudioPCMBuffer(pcmFormat: output, frameCapacity: format.isOpus ? AVAudioFrameCount(format.sampleRate * 120 / 1000) : 1024) else { throw ProtocolError.malformed("AAC 输出缓冲区") }
+            guard let pcm = AVAudioPCMBuffer(pcmFormat: output, frameCapacity: format.isOpus ? AVAudioFrameCount(format.sampleRate * 120 / 1000) : 1024) else { throw ProtocolError.malformed(CWL("AAC 输出缓冲区")) }
             var supplied = false, error: NSError?
             let status = converter.convert(to: pcm, error: &error) { _, state in
                 if supplied { state.pointee = .noDataNow; return nil }
@@ -310,11 +310,11 @@ final class NativeAudioDecoder {
             return pcm.frameLength > 0 ? pcm : nil
         }
         let frameBytes = format.channels * 2
-        guard payload.count % frameBytes == 0 else { throw ProtocolError.malformed("PCM 帧大小") }
+        guard payload.count % frameBytes == 0 else { throw ProtocolError.malformed(CWL("PCM 帧大小")) }
         let frames = payload.count / frameBytes
         guard frames <= format.sampleRate / 4,
               let buffer = AVAudioPCMBuffer(pcmFormat: output, frameCapacity: AVAudioFrameCount(frames)), let planes = buffer.floatChannelData else {
-            throw ProtocolError.malformed("PCM 输出缓冲区")
+            throw ProtocolError.malformed(CWL("PCM 输出缓冲区"))
         }
         buffer.frameLength = AVAudioFrameCount(frames)
         payload.withUnsafeBytes { raw in
@@ -359,11 +359,11 @@ private final class NativeMicrophone {
             DispatchQueue.main.async {
                 guard let self, self.active else { return }
                 if granted { self.beginCapture() }
-                else { self.onLog?("麦克风权限被拒绝，语音输入不可用") }
+                else { self.onLog?(CWL("麦克风权限被拒绝，语音输入不可用")) }
             }
         }
         #else
-        onLog?("麦克风采集需要使用 iPhone/iPad 目标")
+        onLog?(CWL("麦克风采集需要使用 iPhone/iPad 目标"))
         #endif
     }
     private func beginCapture() {
@@ -372,7 +372,7 @@ private final class NativeMicrophone {
             let input = engine.inputNode.outputFormat(forBus: 0)
             guard input.sampleRate > 0, input.channelCount > 0,
                   let output = AVAudioFormat(standardFormatWithSampleRate: Double(rate), channels: 1),
-                  let converter = AVAudioConverter(from: input, to: output) else { throw ProtocolError.malformed("麦克风格式") }
+                  let converter = AVAudioConverter(from: input, to: output) else { throw ProtocolError.malformed(CWL("麦克风格式")) }
             self.converter = converter
             connection.start(queue: .main)
             let slots = self.slots
@@ -395,8 +395,8 @@ private final class NativeMicrophone {
             }
             installedTap = true
             try engine.start()
-            onLog?("\(format.name) 麦克风已启动：\(rate) Hz 单声道")
-        } catch { onLog?("无法启动麦克风：\(error.localizedDescription)"); stop() }
+            onLog?(CWL("{1} 麦克风已启动：{2} Hz 单声道", [String(describing: format.name), String(describing: rate)]))
+        } catch { onLog?(CWL("无法启动麦克风：{1}", [String(describing: error.localizedDescription)])); stop() }
     }
     private func send(_ input: AVAudioPCMBuffer) {
         guard let converter else { return }
@@ -431,7 +431,7 @@ private final class NativeMicrophone {
             }
         } catch {
             failures += 1
-            if failures <= 3 { onLog?("麦克风转换失败：\(error.localizedDescription)") }
+            if failures <= 3 { onLog?(CWL("麦克风转换失败：{1}", [String(describing: error.localizedDescription)])) }
         }
     }
     func stop() {
@@ -454,7 +454,7 @@ final class NativeOpusEncoder {
             mFormatFlags: 0, mBytesPerPacket: 0, mFramesPerPacket: UInt32(frames), mBytesPerFrame: 0,
             mChannelsPerFrame: 1, mBitsPerChannel: 0, mReserved: 0)
         guard let format = AVAudioFormat(streamDescription: &description),
-              let codec = AVAudioConverter(from: pcm, to: format) else { throw ProtocolError.malformed("Opus 编码器不可用") }
+              let codec = AVAudioConverter(from: pcm, to: format) else { throw ProtocolError.malformed(CWL("Opus 编码器不可用")) }
         compressed = format; converter = codec
         converter.primeMethod = .none
         converter.bitRate = rate == 48000 ? 64000 : 32000
@@ -462,7 +462,7 @@ final class NativeOpusEncoder {
     func encode(_ bigEndianPCM: Data) throws -> Data? {
         guard bigEndianPCM.count == frames * 2,
               let input = AVAudioPCMBuffer(pcmFormat: pcm, frameCapacity: AVAudioFrameCount(frames)) else {
-            throw ProtocolError.malformed("Opus 麦克风帧大小")
+            throw ProtocolError.malformed(CWL("Opus 麦克风帧大小"))
         }
         input.frameLength = AVAudioFrameCount(frames)
         bigEndianPCM.withUnsafeBytes { raw in

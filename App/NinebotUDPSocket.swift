@@ -14,7 +14,7 @@ final class NinebotUDPSocket: @unchecked Sendable {
         self.remotePort = remotePort
 
         let fd = Darwin.socket(AF_INET, SOCK_DGRAM, 0)
-        guard fd >= 0 else { throw NinebotSocketError.operation("创建 UDP socket", errno) }
+        guard fd >= 0 else { throw NinebotSocketError.operation(CWL("创建 UDP socket"), errno) }
 
         do {
             var sendBuffer: Int32 = 256 * 1_024
@@ -28,7 +28,7 @@ final class NinebotUDPSocket: @unchecked Sendable {
                     Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
                 }
             }
-            guard bindResult == 0 else { throw NinebotSocketError.operation("绑定 \(localIP):\(localPort)", errno) }
+            guard bindResult == 0 else { throw NinebotSocketError.operation(CWL("绑定 {1}:{2}", [String(describing: localIP), String(describing: localPort)]), errno) }
 
             var remoteAddress = try Self.address(ip: remoteIP, port: remotePort)
             let connectResult = withUnsafePointer(to: &remoteAddress) {
@@ -36,7 +36,7 @@ final class NinebotUDPSocket: @unchecked Sendable {
                     Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
                 }
             }
-            guard connectResult == 0 else { throw NinebotSocketError.operation("连接 \(remoteIP):\(remotePort)", errno) }
+            guard connectResult == 0 else { throw NinebotSocketError.operation(CWL("连接 {1}:{2}", [String(describing: remoteIP), String(describing: remotePort)]), errno) }
 
             let currentFlags = fcntl(fd, F_GETFL, 0)
             if currentFlags >= 0 { _ = fcntl(fd, F_SETFL, currentFlags | O_NONBLOCK) }
@@ -51,7 +51,7 @@ final class NinebotUDPSocket: @unchecked Sendable {
 
     /// 非阻塞发送。发送缓冲区满（EAGAIN/ENOBUFS）时短暂退避重试，
     /// 仍失败则抛出 `NinebotSocketError.isTransient == true` 的错误，由调用方决定丢帧还是终止。
-    func send(_ data: Data) throws {
+    func send(_ data: Data, retryOnBackpressure: Bool = true) throws {
         lock.lock()
         defer { lock.unlock() }
         guard descriptor >= 0 else { throw NinebotSocketError.closed }
@@ -67,7 +67,7 @@ final class NinebotUDPSocket: @unchecked Sendable {
                 return
             }
             let retryable = code == EAGAIN || code == EWOULDBLOCK || code == ENOBUFS || code == EINTR
-            guard retryable, attempt < 4 else { throw NinebotSocketError.operation("发送 UDP 数据", code) }
+            guard retryOnBackpressure, retryable, attempt < 4 else { throw NinebotSocketError.operation(CWL("发送 UDP 数据"), code) }
             attempt += 1
             // 1 + 2 + 3 + 4 ms，最坏约 10 ms，给 Wi-Fi 驱动队列排空的时间
             usleep(useconds_t(1_000 * attempt))
@@ -87,7 +87,7 @@ final class NinebotUDPSocket: @unchecked Sendable {
         // 已 connect 的 UDP socket 收到 ICMP 端口不可达后会返回一次 ECONNREFUSED，
         // 仪表刚开机或端口尚未监听时很常见，不应终止投屏
         if code == ECONNREFUSED { return nil }
-        throw NinebotSocketError.operation("接收 UDP 数据", code)
+        throw NinebotSocketError.operation(CWL("接收 UDP 数据"), code)
     }
 
     func close() {
@@ -123,13 +123,13 @@ enum NinebotSocketError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidAddress(let address):
-            "IPv4 地址无效：\(address)"
+            CWL("IPv4 地址无效：{1}", [String(describing: address)])
         case .operation(let operation, let code):
-            "\(operation)失败：\(String(cString: strerror(code))) (errno \(code))"
+            CWL("{1}失败：{2} (errno {3})", [String(describing: operation), String(describing: String(cString: strerror(code))), String(describing: code)])
         case .shortWrite(let expected, let actual):
-            "UDP 数据发送不完整：应发送 \(expected) 字节，实际 \(actual) 字节"
+            CWL("UDP 数据发送不完整：应发送 {1} 字节，实际 {2} 字节", [String(describing: expected), String(describing: actual)])
         case .closed:
-            "UDP socket 已关闭"
+            CWL("UDP socket 已关闭")
         }
     }
 }

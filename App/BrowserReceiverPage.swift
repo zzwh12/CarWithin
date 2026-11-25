@@ -21,8 +21,16 @@ import Foundation
 enum BrowserReceiverPage {
     /// Sent with hello/format. An open page from an older app build reloads itself,
     /// because its in-page reconnect would otherwise keep running the old script.
-    static let version = "1.0.2"
-    static let html = Data(#"""
+    static var version: String { "1.0.2-" + (CarWithinLanguage.isEnglish ? "en" : "zh") }
+    static var html: Data {
+        if CarWithinLanguage.isEnglish,
+           let url = Bundle.main.url(forResource: "Receiver.en", withExtension: "html"),
+           let page = try? String(contentsOf: url, encoding: .utf8) {
+            return Data(page.replacingOccurrences(of: "\\#(version)", with: version).utf8)
+        }
+        return chineseHTML
+    }
+    private static let chineseHTML = Data(#"""
 <!doctype html>
 <html lang="zh-CN">
 <head>

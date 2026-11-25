@@ -48,26 +48,26 @@ final class BackgroundKeepAlive {
                 guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                       AVAudioSession.InterruptionType(rawValue: raw) == .ended else { return }
                 // Resume whether or not iOS sets shouldResume: staying silent means being suspended.
-                self?.revive(reason: "音频中断结束")
+                self?.revive(reason: CWL("音频中断结束"))
             },
             center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification, object: nil, queue: .main) { [weak self] _ in
                 // Every player is invalid after a media services reset; build a new one.
                 self?.player = nil
-                self?.revive(reason: "系统媒体服务重置")
+                self?.revive(reason: CWL("系统媒体服务重置"))
             },
             center.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
                 guard let self, self.isRunning, self.player?.isPlaying != true else { return }
-                self.revive(reason: "音频路由变化")
+                self.revive(reason: CWL("音频路由变化"))
             }
         ]
         // Catches every other way the player can be stopped (session deactivated, category change).
         let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
             guard let self, self.isRunning, self.player?.isPlaying != true else { return }
-            self.revive(reason: "检测到静音播放已停止")
+            self.revive(reason: CWL("检测到静音播放已停止"))
         }
         RunLoop.main.add(timer, forMode: .common)
         watchdog = timer
-        onLog?("后台保持已开启")
+        onLog?(CWL("后台保持已开启"))
         return true
     }
 
@@ -79,7 +79,9 @@ final class BackgroundKeepAlive {
         observers.forEach(NotificationCenter.default.removeObserver)
         observers = []
         player?.stop()
-        onLog?("后台保持已关闭")
+        player = nil
+        CarPlayAudio.endMediaSession()
+        onLog?(CWL("后台保持已关闭"))
     }
 
     private func revive(reason: String) {
@@ -88,7 +90,7 @@ final class BackgroundKeepAlive {
         let ok = play(reason: reason)
         // Log the first few and then every 10th so a flapping session cannot flood the log.
         if restarts <= 3 || restarts % 10 == 0 {
-            onLog?(ok ? "后台保持已恢复（\(reason)，第 \(restarts) 次）" : "后台保持恢复失败（\(reason)）")
+            onLog?(ok ? CWL("后台保持已恢复（{1}，第 {2} 次）", [String(describing: reason), String(describing: restarts)]) : CWL("后台保持恢复失败（{1}）", [String(describing: reason)]))
         }
     }
 
@@ -96,7 +98,7 @@ final class BackgroundKeepAlive {
         do {
             let session = AVAudioSession.sharedInstance()
             if reason == nil {
-                onLog?("后台保持准备：类别 \(session.category.rawValue)，模式 \(session.mode.rawValue)，选项 \(session.categoryOptions.rawValue)，路由 \(session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","))")
+                onLog?(CWL("后台保持准备：类别 {1}，模式 {2}，选项 {3}，路由 {4}", [String(describing: session.category.rawValue), String(describing: session.mode.rawValue), String(describing: session.categoryOptions.rawValue), String(describing: session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","))]))
             }
             if session.category != .playback && session.category != .playAndRecord {
                 try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
@@ -114,13 +116,13 @@ final class BackgroundKeepAlive {
             guard player.play() else {
                 self.player = nil
                 if reason == nil {
-                    onLog?("后台保持开启失败：系统拒绝播放（类别 \(session.category.rawValue)，模式 \(session.mode.rawValue)，选项 \(session.categoryOptions.rawValue)，路由 \(session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","))）")
+                    onLog?(CWL("后台保持开启失败：系统拒绝播放（类别 {1}，模式 {2}，选项 {3}，路由 {4}）", [String(describing: session.category.rawValue), String(describing: session.mode.rawValue), String(describing: session.categoryOptions.rawValue), String(describing: session.currentRoute.outputs.map { $0.portType.rawValue }.joined(separator: ","))]))
                 }
                 return false
             }
             return true
         } catch {
-            if reason == nil { onLog?("后台保持开启失败：\(error.localizedDescription)") }
+            if reason == nil { onLog?(CWL("后台保持开启失败：{1}", [String(describing: error.localizedDescription)])) }
             return false
         }
     }

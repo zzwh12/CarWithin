@@ -6,7 +6,7 @@ import CryptoKit
 enum LocalTLSIdentity {
     private static let keyTag = Data("com.carplays.browser-https.key".utf8)
     /// Internal Keychain label from before the rename; kept so the trusted certificate survives updates.
-    private static let certificateLabel = "CarPlays 浏览器 HTTPS"
+    private static let certificateLabel = CWL("CarPlays 浏览器 HTTPS")
     private static let rootTag = Data("com.carwithin.browser-https.root".utf8)
     private static let rootLabel = "CarWithin HTTPS Root"
     private static let addressesKey = "browserHTTPSAddresses.v2"
@@ -52,7 +52,7 @@ enum LocalTLSIdentity {
         let status = SecItemCopyMatching(keychain.merging([kSecClass: kSecClassCertificate, kSecAttrLabel: label,
                                           kSecReturnRef: true]) { $1 } as CFDictionary, &item)
         guard status == errSecSuccess, let item, CFGetTypeID(item) == SecCertificateGetTypeID() else {
-            throw TLSIdentityError.keychain("查找证书", status)
+            throw TLSIdentityError.keychain(CWL("查找证书"), status)
         }
         return item as! SecCertificate
     }
@@ -68,13 +68,13 @@ enum LocalTLSIdentity {
         var identities: CFTypeRef?
         let found = SecItemCopyMatching(keychain.merging([kSecClass: kSecClassIdentity, kSecMatchLimit: kSecMatchLimitAll,
                                          kSecReturnRef: true]) { $1 } as CFDictionary, &identities)
-        guard found == errSecSuccess, let list = identities as? [SecIdentity] else { throw TLSIdentityError.keychain("查找身份", found) }
+        guard found == errSecSuccess, let list = identities as? [SecIdentity] else { throw TLSIdentityError.keychain(CWL("查找身份"), found) }
         for identity in list {
             var candidate: SecCertificate?
             if SecIdentityCopyCertificate(identity, &candidate) == errSecSuccess, let candidate,
                SecCertificateCopyData(candidate) as Data == der { return identity }
         }
-        throw TLSIdentityError.keychain("匹配私钥", errSecItemNotFound)
+        throw TLSIdentityError.keychain(CWL("匹配私钥"), errSecItemNotFound)
     }
 
     private static func loadRoot() throws -> (SecKey, Data) {
@@ -89,7 +89,7 @@ enum LocalTLSIdentity {
             UserDefaults.standard.removeObject(forKey: expiryKey)
         } else {
             guard status == errSecSuccess, let item, CFGetTypeID(item) == SecKeyGetTypeID() else {
-                throw TLSIdentityError.keychain("读取 HTTPS 根证书私钥", status)
+                throw TLSIdentityError.keychain(CWL("读取 HTTPS 根证书私钥"), status)
             }
             key = item as! SecKey
         }
@@ -119,11 +119,11 @@ enum LocalTLSIdentity {
 
     private static func storeCertificate(_ der: Data, label: String) throws -> SecCertificate {
         guard let certificate = SecCertificateCreateWithData(nil, der as CFData) else {
-            throw TLSIdentityError.certificate("证书编码无效")
+            throw TLSIdentityError.certificate(CWL("证书编码无效"))
         }
         let added = SecItemAdd(keychain.merging([kSecClass: kSecClassCertificate, kSecValueRef: certificate, kSecAttrLabel: label,
                                 kSecAttrAccessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly]) { $1 } as CFDictionary, nil)
-        guard added == errSecSuccess else { throw TLSIdentityError.keychain("保存证书", added) }
+        guard added == errSecSuccess else { throw TLSIdentityError.keychain(CWL("保存证书"), added) }
         return certificate
     }
 
@@ -131,7 +131,7 @@ enum LocalTLSIdentity {
         var error: Unmanaged<CFError>?
         guard let publicKey = SecKeyCopyPublicKey(key),
               let point = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
-            throw TLSIdentityError.certificate("无法读取公钥")
+            throw TLSIdentityError.certificate(CWL("无法读取公钥"))
         }
         return point
     }
@@ -222,7 +222,7 @@ enum LocalTLSIdentity {
         case keychain(String, OSStatus), certificate(String)
         var errorDescription: String? {
             switch self {
-            case .keychain(let step, let status): "\(step)失败（\(status)）"
+            case .keychain(let step, let status): CWL("{1}失败（{2}）", [String(describing: step), String(describing: status)])
             case .certificate(let message): message
             }
         }
@@ -236,7 +236,7 @@ extension LocalTLSIdentity {
         let certificate: [String: Any] = [
             "PayloadType": "com.apple.security.root", "PayloadVersion": 1,
             "PayloadUUID": UUID().uuidString, "PayloadIdentifier": identifier + ".root",
-            "PayloadDisplayName": "CarWithin HTTPS 根证书", "PayloadContent": root
+            "PayloadDisplayName": CWL("CarWithin HTTPS 根证书"), "PayloadContent": root
         ]
         let configuration: [String: Any] = [
             "PayloadType": "Configuration", "PayloadVersion": 1,
@@ -253,13 +253,13 @@ extension LocalTLSIdentity {
         :root{color-scheme:light dark}body{max-width:40rem;margin:3rem auto;padding:0 1rem;font:16px/1.6 system-ui}
         code{overflow-wrap:anywhere}li{margin:.75rem 0}
         </style>
-        <h1>配置 CarWithin HTTPS</h1>
+        <h1>\(CWL("配置 CarWithin HTTPS"))</h1>
         <ol>
-        <li>在 CarWithin 的日志中核对根证书 SHA-256<br><code>\(fingerprint(root))</code></li>
-        <li>iPhone / iPad：<a href="/carwithin.mobileconfig">下载描述文件</a>，在「设置」安装。之后进入「通用 → 关于本机 → 证书信任设置」，为该证书启用完全信任。</li>
-        <li>Android：<a href="/carwithin.crt" download>下载 CA 证书</a>，在系统「设置」搜索「安装证书」，选择「CA 证书」，安装下载的文件。不同机型的菜单名称可能不同。安装后用支持系统用户证书的浏览器打开 HTTPS 接收页。</li>
+        <li>\(CWL("在 CarWithin 的日志中核对根证书 SHA-256"))<br><code>\(fingerprint(root))</code></li>
+        <li>iPhone / iPad：<a href="/carwithin.mobileconfig">\(CWL("下载描述文件"))</a>\(CWL("，在「设置」安装。之后进入「通用 → 关于本机 → 证书信任设置」，为该证书启用完全信任。"))</li>
+        <li>Android：<a href="/carwithin.crt" download>\(CWL("下载 CA 证书"))</a>\(CWL("，在系统「设置」搜索「安装证书」，选择「CA 证书」，安装下载的文件。不同机型的菜单名称可能不同。安装后用支持系统用户证书的浏览器打开 HTTPS 接收页。"))</li>
         </ol>
-        <p><a id="play" href="/">打开 HTTPS 接收页</a> · <a href="/">使用 HTTP 接收页</a></p>
+        <p><a id="play" href="/">\(CWL("打开 HTTPS 接收页"))</a> · <a href="/">\(CWL("使用 HTTP 接收页"))</a></p>
         <script>document.getElementById('play').href='https://'+location.hostname+':\(port)/';</script>
         </html>
         """.utf8)

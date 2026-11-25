@@ -44,10 +44,10 @@ enum CarPlayInfo {
         let modes: [String: Any] = ["resources": resources, "appStates": [
             ["appStateID": 2, "state": false], ["appStateID": 1, "speechMode": -1], ["appStateID": 3, "state": false]]]
         let hidDevices = [
-            hidDevice(HID.touch, name: "CarWithin 触控屏", descriptor: touchDescriptor(width: config.width, height: config.height)),
-            hidDevice(HID.knob, name: "CarWithin 旋钮", descriptor: knobDescriptor),
-            hidDevice(HID.media, name: "CarWithin 多媒体键", descriptor: mediaDescriptor),
-            hidDevice(HID.telephony, name: "CarWithin 电话键", descriptor: telephonyDescriptor)
+            hidDevice(HID.touch, name: CWL("CarWithin 触控屏"), descriptor: touchDescriptor(width: config.width, height: config.height)),
+            hidDevice(HID.knob, name: CWL("CarWithin 旋钮"), descriptor: knobDescriptor),
+            hidDevice(HID.media, name: CWL("CarWithin 多媒体键"), descriptor: mediaDescriptor),
+            hidDevice(HID.telephony, name: CWL("CarWithin 电话键"), descriptor: telephonyDescriptor)
         ]
         var info: [String: Any] = ["sourceVersion": "509.11", "features": NSNumber(value: features(audio: config.audioEnabled)), "statusFlags": 4,
             "model": "CarWithin1,1", "manufacturer": "CarWithin", "deviceID": config.deviceID,

@@ -81,14 +81,14 @@ final class TailingOutputSession: @unchecked Sendable {
     private var isActive: Bool { condition.lock(); defer { condition.unlock() }; return !closed && !failed }
 
     func start() {
-        onState?("正在连接台铃仪表…")
+        onState?(CWL("正在连接台铃仪表…"))
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             var lastSentJPEGBytes: Int?
             do {
                 try connection.start()
                 guard !isClosed else { return }
-                onState?("仪表已连接，等待 CarPlay 画面。")
-                onLog?("台铃 JPEG 转码使用 CPU，锁屏后继续转换新画面")
+                onState?(CWL("仪表已连接，等待 CarPlay 画面。"))
+                onLog?(CWL("台铃 JPEG 转码使用 CPU，锁屏后继续转换新画面"))
                 var statistics = TailingDeliveryStatistics()
                 var nextSend = Date.distantPast
                 var sentFirst = false
@@ -121,15 +121,15 @@ final class TailingOutputSession: @unchecked Sendable {
                     nextSend = Date().addingTimeInterval(1.0 / 20)
                     if !sentFirst {
                         sentFirst = true
-                        onState?("正在投屏 · 480×272 · JPEG · 最高 20 FPS")
+                        onState?(CWL("正在投屏 · 480×272 · JPEG · 最高 20 FPS"))
                     }
                 }
             } catch {
                 if !isClosed {
                     if let lastSentJPEGBytes {
-                        onLog?(String(format: "台铃断流前最后一次 TCP 写入：JPEG %.1f KiB", Double(lastSentJPEGBytes) / 1024))
+                        onLog?(String(format: CWL("台铃断流前最后一次 TCP 写入：JPEG %.1f KiB"), Double(lastSentJPEGBytes) / 1024))
                     }
-                    let message = "台铃连接失败：\(error.localizedDescription)"
+                    let message = CWL("台铃连接失败：{1}", [String(describing: error.localizedDescription)])
                     onLog?(message)
                     onState?(message)
                     condition.lock(); failed = true; latestJPEG = nil; condition.unlock()
@@ -180,7 +180,7 @@ final class TailingOutputSession: @unchecked Sendable {
                 if recovery {
                     guard keyframe, mayRecover else { return }
                     decoder?.invalidate(); decoder = nil; waitingForKeyframe = true
-                    onLog?("台铃解码会话失效，正在从关键帧重建")
+                    onLog?(CWL("台铃解码会话失效，正在从关键帧重建"))
                 }
                 let units = try AnnexB.units(in: data)
                 var changed = false
@@ -196,7 +196,7 @@ final class TailingOutputSession: @unchecked Sendable {
                     decoder = try TailingH264Decoder(configuration: parameters.decoderConfigurationRecord(),
                         output: { [weak self] in self?.encode($0) },
                         failure: { [weak self] in self?.decoderFailed($0) })
-                    onLog?("台铃 H.264：\(decoder?.backendDescription ?? "未创建")")
+                    onLog?(CWL("台铃 H.264：{1}", [String(describing: decoder?.backendDescription ?? CWL("未创建"))]))
                     waitingForKeyframe = true
                 }
                 guard let decoder, !picture.isEmpty, !waitingForKeyframe || keyframe else { return }
@@ -219,7 +219,7 @@ final class TailingOutputSession: @unchecked Sendable {
         let report = now - lastDecoderErrorAt >= 5
         if report { lastDecoderErrorAt = now }
         condition.unlock()
-        if report { onLog?("台铃 H.264 解码失败：\(error.localizedDescription)") }
+        if report { onLog?(CWL("台铃 H.264 解码失败：{1}", [String(describing: error.localizedDescription)])) }
         onKeyframeRequest?()
     }
 
@@ -262,7 +262,7 @@ final class TailingOutputSession: @unchecked Sendable {
                     // A bad frame must not replace a valid cached image or flood the log.
                     if !reportedJPEGError && isActive {
                         reportedJPEGError = true
-                        onLog?("台铃跳过无法编码的画面：\(error.localizedDescription)")
+                        onLog?(CWL("台铃跳过无法编码的画面：{1}", [String(describing: error.localizedDescription)]))
                     }
                 }
             }
@@ -311,8 +311,8 @@ enum TailingJPEGEncoder {
         case unavailable, tooLarge
         var errorDescription: String? {
             switch self {
-            case .unavailable: return "JPEG 编码失败"
-            case .tooLarge: return "JPEG 无法压缩到单帧 24 KiB 以下"
+            case .unavailable: return CWL("JPEG 编码失败")
+            case .tooLarge: return CWL("JPEG 无法压缩到单帧 24 KiB 以下")
             }
         }
     }
@@ -331,7 +331,7 @@ private struct TailingDeliveryStatistics {
         let now = ProcessInfo.processInfo.systemUptime
         let elapsed = now - started
         guard elapsed >= 5 else { return nil }
-        let report = String(format: "台铃窗口 %.1f 秒：发送 %.1f FPS，新画面 %d/%d 帧，JPEG 平均 %.1f / 最大 %.1f KiB，限幅 %d 帧，最长等待拉帧 %.0f ms / 写入 %.0f ms",
+        let report = String(format: CWL("台铃窗口 %.1f 秒：发送 %.1f FPS，新画面 %d/%d 帧，JPEG 平均 %.1f / 最大 %.1f KiB，限幅 %d 帧，最长等待拉帧 %.0f ms / 写入 %.0f ms"),
             elapsed, Double(frames) / elapsed, freshFrames, frames, Double(totalBytes) / Double(frames) / 1024,
             Double(maximumBytes) / 1024, reducedFrames, maximumPull * 1000, maximumWrite * 1000)
         self = TailingDeliveryStatistics()
@@ -363,7 +363,7 @@ final class TailingPerformanceDiagnostics: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         let now = ProcessInfo.processInfo.systemUptime, cpu = Self.cpuTime()
         let elapsed = max(0.001, now - lastTime)
-        let text = String(format: "台铃性能：进程 CPU %.0f%%（单核100%%），解码 %d 帧 平均/最大 %.1f/%.1f ms，解码排队最大 %.1f ms，JPEG %d 帧 平均/最大 %.1f/%.1f ms，热状态 %d",
+        let text = String(format: CWL("台铃性能：进程 CPU %.0f%%（单核100%%），解码 %d 帧 平均/最大 %.1f/%.1f ms，解码排队最大 %.1f ms，JPEG %d 帧 平均/最大 %.1f/%.1f ms，热状态 %d"),
             (cpu - lastCPU) / elapsed * 100, decodeCount, decodeTime / Double(max(1, decodeCount)) * 1000,
             decodeMaximum * 1000, queueMaximum * 1000, encodeCount,
             encodeTime / Double(max(1, encodeCount)) * 1000, encodeMaximum * 1000,

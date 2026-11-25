@@ -14,6 +14,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("ipa", type=Path)
     parser.add_argument("--notes", type=Path, required=True, help="UTF-8 update summary")
+    parser.add_argument("--notes-en", type=Path, help="Optional UTF-8 English update summary")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.ipa.resolve() == args.output.resolve():
@@ -41,6 +42,11 @@ def main():
                     build=int(build_text), minimumOSVersion=minimum, releaseTag="v" + version,
                     ipaName=args.ipa.name, size=args.ipa.stat().st_size,
                     sha256=digest.hexdigest(), notes=notes)
+    if args.notes_en is not None:
+        notes_en = args.notes_en.read_text(encoding="utf-8").strip()
+        if not notes_en:
+            parser.error("English notes must not be empty when supplied")
+        metadata["notesEn"] = notes_en
     args.output.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(args.output)
 

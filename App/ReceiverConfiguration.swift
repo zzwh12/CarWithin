@@ -28,7 +28,16 @@ struct ReceiverConfiguration {
     var carLifeAddress: String?
     var carbitAddress: String?
     var zeehoAddress: String?
+    var zeehoAutomaticAddress = false
+    var zeehoProfile: TailingDisplayProfile = .zeeho62
+    var zeehoFrameRate: ZeehoFrameRate = .fps25
+    var zeehoVideoMode: ZeehoVideoMode = .transcode
+    /// 春风仪表（MotoPlay / PXC）：手机监听 10920/10921/10922，向仪表 10930 探测。
+    /// 留空表示自动取本机所在网段的网关（仪表热点一般是 .1）。
+    var cfmotoAddress: String?
+    var cfmotoProfile: CfmotoProfile?
     var ninebotAddress: String?
+    var ninebotMode: NinebotOutput.Mode = .fiveInch
     var tailingAddress: String?
     var tailingPhoneInfo: TailingPhoneInfo?
     var carLinkRelayAddress: String?
@@ -42,12 +51,12 @@ struct ReceiverConfiguration {
     var oemIconLabel = "CarWithin"
 
     /// Choices for "CarPlay 图标大小", as declared screen widths (OpenXPlay offers the same four).
-    static let iconSizes: [(title: String, widthMM: Int)] = [("大", 125), ("默认", 200), ("较小", 250), ("最小", 300)]
+    static let iconSizes: [(title: String, widthMM: Int)] = [(CWL("大"), 125), (CWL("默认"), 200), (CWL("较小"), 250), (CWL("最小"), 300)]
 
     /// CarPlay day/night appearance. Raw values are persisted.
     enum Appearance: Int, CaseIterable {
         case system = 0, light = 1, dark = 2
-        var title: String { ["跟随系统", "白天", "夜间"][rawValue] }
+        var title: String { [CWL("跟随系统"), CWL("白天"), CWL("夜间")][rawValue] }
     }
 
     struct Resolution { let label: String; let width: Int; let height: Int }
@@ -131,32 +140,41 @@ struct ReceiverConfiguration {
     func validate(requiresLocalAddress: Bool = true, requiresWiFiCredentials: Bool = true) throws {
         var parsed = in_addr()
         guard inet_pton(AF_INET, address, &parsed) == 1 else {
-            throw ConfigurationError("请选择有效的 IPv4 地址。")
+            throw ConfigurationError(CWL("请选择有效的 IPv4 地址。"))
         }
         if requiresLocalAddress && !Self.localIPv4Addresses().contains(address) {
-            throw ConfigurationError("请选择属于本机当前网络连接的 IP 地址。")
+            throw ConfigurationError(CWL("请选择属于本机当前网络连接的 IP 地址。"))
         }
         // Fixed presets or a size that follows the head unit: even, within 320…3840 per side and
         // at most 4K in area; frame rate 30–60 in steps of 5.
         guard Self.supportsDisplaySize(width: width, height: height),
               (30...60).contains(maxFPS), maxFPS % 5 == 0, (100...400).contains(widthPhysicalMM) else {
-            throw ConfigurationError("请选择受支持的分辨率和帧率。")
+            throw ConfigurationError(CWL("请选择受支持的分辨率和帧率。"))
         }
         if let carLifeAddress {
             var parsedCarLife = in_addr()
             guard inet_pton(AF_INET, carLifeAddress, &parsedCarLife) == 1 else {
-                throw ConfigurationError("CarLife 车机 IP 地址无效，请填写 IPv4 地址或留空。")
+                throw ConfigurationError(CWL("CarLife 车机 IP 地址无效，请填写 IPv4 地址或留空。"))
             }
         }
         if let carbitAddress, !CarbitConnectionCode.isLocalAddress(carbitAddress) || carbitAddress == address {
-            throw ConfigurationError("请在亿连输出设置中选择车机或填写它的局域网 IPv4 地址。")
+            throw ConfigurationError(CWL("请在亿连输出设置中选择车机或填写它的局域网 IPv4 地址。"))
         }
-        if let zeehoAddress {
+        if let zeehoAddress, !zeehoAutomaticAddress {
             var target = in_addr()
             guard inet_pton(AF_INET, zeehoAddress, &target) == 1, zeehoAddress != address,
                   !zeehoAddress.hasPrefix("127."), !zeehoAddress.hasPrefix("0."),
                   !zeehoAddress.hasPrefix("169.254."), UInt32(bigEndian: target.s_addr) < 0xe0000000 else {
-                throw ConfigurationError("请输入有效的极核仪表 IPv4 地址，与本机 IP 不同。")
+                throw ConfigurationError(CWL("请输入有效的极核仪表 IPv4 地址，与本机 IP 不同。"))
+            }
+        }
+        if let cfmotoAddress, !cfmotoAddress.isEmpty {
+            var target = in_addr()
+            guard inet_pton(AF_INET, cfmotoAddress, &target) == 1, cfmotoAddress != address,
+                  !cfmotoAddress.hasPrefix("127."), !cfmotoAddress.hasPrefix("0."),
+                  !cfmotoAddress.hasPrefix("169.254."), UInt32(bigEndian: target.s_addr) < 0xe0000000,
+                  !cfmotoAddress.hasSuffix(".0"), !cfmotoAddress.hasSuffix(".255") else {
+                throw ConfigurationError("请输入春风仪表真实的 IPv4 地址（不能用网段地址 .0 或广播地址 .255），留空则自动取网关 .1。")
             }
         }
         if let ninebotAddress {
@@ -164,7 +182,7 @@ struct ReceiverConfiguration {
             guard inet_pton(AF_INET, ninebotAddress, &target) == 1, ninebotAddress != address,
                   !ninebotAddress.hasPrefix("127."), !ninebotAddress.hasPrefix("0."),
                   !ninebotAddress.hasPrefix("169.254."), UInt32(bigEndian: target.s_addr) < 0xe0000000 else {
-                throw ConfigurationError("请输入有效的九号仪表 IPv4 地址，与本机 IP 不同。")
+                throw ConfigurationError(CWL("请输入有效的九号仪表 IPv4 地址，与本机 IP 不同。"))
             }
         }
         if let tailingAddress {
@@ -172,21 +190,21 @@ struct ReceiverConfiguration {
             guard inet_pton(AF_INET, tailingAddress, &target) == 1, tailingAddress != address,
                   !tailingAddress.hasPrefix("127."), !tailingAddress.hasPrefix("0."),
                   UInt32(bigEndian: target.s_addr) < 0xe0000000 else {
-                throw ConfigurationError("请输入有效的台铃仪表 IPv4 地址，与本机 IP 不同。")
+                throw ConfigurationError(CWL("请输入有效的台铃仪表 IPv4 地址，与本机 IP 不同。"))
             }
         }
         if let carLinkRelayAddress {
             var address = in_addr()
             guard inet_pton(AF_INET, carLinkRelayAddress, &address) == 1 else {
-                throw ConfigurationError("请输入 CarLink 中继的 IPv4 地址。")
+                throw ConfigurationError(CWL("请输入 CarLink 中继的 IPv4 地址。"))
             }
         }
         guard requiresWiFiCredentials else { return }
         guard !ssid.isEmpty, ssid.utf8.count <= 32 else {
-            throw ConfigurationError(ssid.isEmpty ? "启动前请输入 Wi-Fi 名称。" : "Wi-Fi 名称不能超过 32 个 UTF-8 字节。")
+            throw ConfigurationError(ssid.isEmpty ? CWL("启动前请输入 Wi-Fi 名称。") : CWL("Wi-Fi 名称不能超过 32 个 UTF-8 字节。"))
         }
         guard password.isEmpty || (8...63).contains(password.utf8.count) else {
-            throw ConfigurationError("请输入 8–63 字节的 Wi-Fi 密码，开放网络则留空。")
+            throw ConfigurationError(CWL("请输入 8–63 字节的 Wi-Fi 密码，开放网络则留空。"))
         }
     }
 }

@@ -135,10 +135,10 @@ struct ReleaseHistoryView: View {
                                 .foregroundStyle(.primary)
                             Spacer()
                             if ReleaseVersion(release.version) == ReleaseVersion(installed) {
-                                Text("当前安装").foregroundStyle(.secondary).font(.caption)
+                                Text(CWL("当前安装")).foregroundStyle(.secondary).font(.caption)
                             }
                             if release.tag_name == latestTag {
-                                Text("最新发布").foregroundStyle(.blue).font(.caption)
+                                Text(CWL("最新发布")).foregroundStyle(.blue).font(.caption)
                             }
                         }
                         if let date = release.published_at {
@@ -151,20 +151,20 @@ struct ReleaseHistoryView: View {
             if let error {
                 Section {
                     Text(error).foregroundStyle(.secondary)
-                    Button("重试") { Task { await load() } }
+                    Button(CWL("重试")) { Task { await load() } }
                 }
             } else if loading {
                 HStack { Spacer(); ProgressView(); Spacer() }
             } else if releases.isEmpty {
-                Text("暂无公开版本").foregroundStyle(.secondary)
+                Text(CWL("暂无公开版本")).foregroundStyle(.secondary)
             } else if hasNext {
-                Button("加载更多") { Task { await load() } }
+                Button(CWL("加载更多")) { Task { await load() } }
             }
             Section {
-                Link("在 GitHub 查看", destination: AppRelease.repository.appendingPathComponent("releases"))
+                Link(CWL("在 GitHub 查看"), destination: AppRelease.repository.appendingPathComponent("releases"))
             }
         }
-        .navigationTitle("版本记录")
+        .navigationTitle(CWL("版本记录"))
         .navigationBarTitleDisplayMode(.inline)
         .task {
             if releases.isEmpty { await load() }
@@ -214,9 +214,9 @@ struct ReleaseDetailView: View {
 
     private var status: String {
         guard release.tag_name == latestTag, let update = release.update else {
-            return "版本详情"
+            return CWL("版本详情")
         }
-        return update.build > installedBuild ? "发现新版本" : "已是最新发布版本"
+        return update.build > installedBuild ? CWL("发现新版本") : CWL("已是最新发布版本")
     }
 
     var body: some View {
@@ -227,21 +227,21 @@ struct ReleaseDetailView: View {
                         .font(.subheadline.weight(.medium)).foregroundStyle(.blue)
                     Text("CarWithin \(release.version)").font(.title2.bold())
                     if let update = release.update {
-                        Text("发布构建 \(update.build)").font(.subheadline).foregroundStyle(.secondary)
+                        Text(CWL("发布构建 {1}", [String(describing: update.build)])).font(.subheadline).foregroundStyle(.secondary)
                     }
-                    Text("当前安装 \(installed)（\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-")）")
+                    Text(CWL("当前安装 {1}（{2}）", [String(describing: installed), String(describing: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-")]))
                         .font(.subheadline).foregroundStyle(.secondary)
                     if let date = release.published_at {
                         Text(date, style: .date).font(.subheadline).foregroundStyle(.secondary)
                     }
                 }
-                ReleaseNotesView(markdown: release.update?.notes ?? release.body ?? "此版本暂无更新说明。")
+                ReleaseNotesView(markdown: release.update?.localizedNotes() ?? release.body ?? CWL("此版本暂无更新说明。"))
                 if release.update != nil, let body = release.body, !body.isEmpty {
-                    DisclosureGroup("完整发布说明", isExpanded: $expandedNotes) {
+                    DisclosureGroup(CWL("完整发布说明"), isExpanded: $expandedNotes) {
                         ReleaseNotesView(markdown: body).padding(.top, 12)
                     }
                 }
-                Link("在 GitHub 查看", destination: release.pageURL)
+                Link(CWL("在 GitHub 查看"), destination: release.pageURL)
                     .frame(maxWidth: .infinity)
             }
             .padding(24)
@@ -252,19 +252,19 @@ struct ReleaseDetailView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 10) {
                 if !supportedOS {
-                    Text("此版本需要 iOS \(release.update?.minimumOSVersion ?? "") 或更高版本。")
+                    Text(CWL("此版本需要 iOS {1} 或更高版本。", [String(describing: release.update?.minimumOSVersion ?? "")]))
                         .font(.footnote).foregroundStyle(.secondary)
                 } else if let asset = release.ipa {
                     ReleaseDownloadView(asset: asset, canDownload: canDownload)
                 } else {
-                    Text("此版本暂无 IPA 附件。").font(.footnote).foregroundStyle(.secondary)
+                    Text(CWL("此版本暂无 IPA 附件。")).font(.footnote).foregroundStyle(.secondary)
                 }
                 if automatic {
-                    Button("下次再说") {
+                    Button(CWL("下次再说")) {
                         AppUpdatePolicy().snooze()
                         finish()
                     }.buttonStyle(ReleaseActionStyle(kind: .secondary))
-                    Button("此版本不再提醒") {
+                    Button(CWL("此版本不再提醒")) {
                         AppUpdatePolicy().ignore(release)
                         finish()
                     }.buttonStyle(ReleaseActionStyle(kind: .outline))
@@ -278,12 +278,12 @@ struct ReleaseDetailView: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .overlay(alignment: .top) { Divider() }
         }
-        .navigationTitle(automatic ? "版本更新" : "版本详情")
+        .navigationTitle(automatic ? CWL("版本更新") : CWL("版本详情"))
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if close != nil {
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("完成") {
+                    Button(CWL("完成")) {
                         if automatic { AppUpdatePolicy().snooze() }
                         finish()
                     }
@@ -338,35 +338,35 @@ private struct ReleaseDownloadView: View {
             if download.isDownloading {
                 if let progress = download.progress {
                     ProgressView(value: progress)
-                    Text("正在下载 \(Int(progress * 100))%").font(.subheadline)
-                } else { ProgressView("正在连接下载…") }
-                Button("取消下载", role: .cancel) { download.cancel() }
+                    Text(CWL("正在下载 {1}%", [String(describing: Int(progress * 100))])).font(.subheadline)
+                } else { ProgressView(CWL("正在连接下载…")) }
+                Button(CWL("取消下载"), role: .cancel) { download.cancel() }
                     .buttonStyle(ReleaseActionStyle(kind: .outline))
             } else if let file = download.file {
                 Button { sharing = true } label: {
-                    Label("打开或分享 IPA", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
+                    Label(CWL("打开或分享 IPA"), systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
                 }.buttonStyle(ReleaseActionStyle(kind: .primary))
                 Button { exporting = true } label: {
-                    Label("保存到文件", systemImage: "folder").frame(maxWidth: .infinity)
+                    Label(CWL("保存到文件"), systemImage: "folder").frame(maxWidth: .infinity)
                 }.buttonStyle(ReleaseActionStyle(kind: .secondary))
-                Text("下载完成 · \(file.lastPathComponent)")
+                Text(CWL("下载完成 · {1}", [String(describing: file.lastPathComponent)]))
                     .font(.caption).foregroundStyle(.secondary)
                 if download.asset.sha256 == nil {
-                    Text("此历史版本未提供 SHA-256，已核对文件大小与格式。").font(.caption).foregroundStyle(.secondary)
+                    Text(CWL("此历史版本未提供 SHA-256，已核对文件大小与格式。")).font(.caption).foregroundStyle(.secondary)
                 }
             } else {
                 Button {
                     guard canDownload() else {
-                        download.error = "请先停止 CarPlay，再下载 IPA。"
+                        download.error = CWL("请先停止 CarPlay，再下载 IPA。")
                         return
                     }
                     download.start()
                 } label: {
-                    Label("下载此版本 · \(ByteCountFormatter.string(fromByteCount: download.asset.size, countStyle: .file))",
+                    Label(CWL("下载此版本 · {1}", [String(describing: ByteCountFormatter.string(fromByteCount: download.asset.size, countStyle: .file))]),
                           systemImage: "arrow.down.circle")
                         .frame(maxWidth: .infinity)
                 }.buttonStyle(ReleaseActionStyle(kind: .primary))
-                Text("IPA 需自行签名安装；下载后可分享给签名工具或保存到文件。")
+                Text(CWL("IPA 需自行签名安装；下载后可分享给签名工具或保存到文件。"))
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let error = download.error {

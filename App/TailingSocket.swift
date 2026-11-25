@@ -21,14 +21,14 @@ final class TailingSocket: @unchecked Sendable {
             let result = withUnsafeMutablePointer(to: &address) {
                 $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &size) }
             }
-            guard result == 0 else { throw TailingError.system("读取本机端口", errno) }
+            guard result == 0 else { throw TailingError.system(CWL("读取本机端口"), errno) }
             return UInt16(bigEndian: address.sin_port)
         }
     }
 
     static func create() throws -> TailingSocket {
         let fd = Darwin.socket(AF_INET, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw TailingError.system("创建 TCP", errno) }
+        guard fd >= 0 else { throw TailingError.system(CWL("创建 TCP"), errno) }
         let result = TailingSocket(fd)
         do {
             try configure(fd)
@@ -50,7 +50,7 @@ final class TailingSocket: @unchecked Sendable {
         var reuse: Int32 = 1
         _ = setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
         try Self.bind(fd, ip: localIP, port: port)
-        guard Darwin.listen(fd, 4) == 0 else { throw TailingError.system("监听 TCP\(port)", errno) }
+        guard Darwin.listen(fd, 4) == 0 else { throw TailingError.system(CWL("监听 TCP{1}", [String(describing: port)]), errno) }
     }
 
     func connect(localIP: String, remoteIP: String, port: UInt16, timeout: TimeInterval = 3) throws {
@@ -64,14 +64,14 @@ final class TailingSocket: @unchecked Sendable {
             }
         }
         if result != 0 {
-            guard errno == EINPROGRESS else { throw TailingError.system("连接 TCP\(port)", errno) }
-            try wait(fd, events: Int16(POLLOUT), deadline: Self.now + timeout, operation: "连接 TCP\(port)")
+            guard errno == EINPROGRESS else { throw TailingError.system(CWL("连接 TCP{1}", [String(describing: port)]), errno) }
+            try wait(fd, events: Int16(POLLOUT), deadline: Self.now + timeout, operation: CWL("连接 TCP{1}", [String(describing: port)]))
             var error: Int32 = 0
             var size = socklen_t(MemoryLayout<Int32>.size)
             guard getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size) == 0 else {
-                throw TailingError.system("读取 TCP 状态", errno)
+                throw TailingError.system(CWL("读取 TCP 状态"), errno)
             }
-            guard error == 0 else { throw TailingError.system("连接 TCP\(port)", error) }
+            guard error == 0 else { throw TailingError.system(CWL("连接 TCP{1}", [String(describing: port)]), error) }
         }
     }
 
@@ -79,7 +79,7 @@ final class TailingSocket: @unchecked Sendable {
         let fd = try duplicate()
         defer { release(fd) }
         while true {
-            try wait(fd, events: Int16(POLLIN), deadline: nil, operation: "等待仪表连接")
+            try wait(fd, events: Int16(POLLIN), deadline: nil, operation: CWL("等待仪表连接"))
             var address = sockaddr_in()
             var length = socklen_t(MemoryLayout<sockaddr_in>.size)
             let accepted = withUnsafeMutablePointer(to: &address) {
@@ -87,7 +87,7 @@ final class TailingSocket: @unchecked Sendable {
             }
             if accepted < 0 {
                 if errno == EAGAIN || errno == EINTR { continue }
-                throw TailingError.system("接受 TCP", errno)
+                throw TailingError.system(CWL("接受 TCP"), errno)
             }
             let expected = try Self.address(remoteIP, 0)
             guard address.sin_family == sa_family_t(AF_INET),
@@ -103,7 +103,7 @@ final class TailingSocket: @unchecked Sendable {
 
     func readExactly(_ count: Int, timeout: TimeInterval? = 10, waitForFirstByte: Bool = false) throws -> Data {
         guard count >= 0, count <= 8 * 1_024 * 1_024 else {
-            throw TailingError.protocolFailure("TCP 读取长度异常")
+            throw TailingError.protocolFailure(CWL("TCP 读取长度异常"))
         }
         if count == 0 { return Data() }
         let fd = try duplicate()
@@ -112,7 +112,7 @@ final class TailingSocket: @unchecked Sendable {
         var data = Data(count: count)
         var offset = 0
         while offset < count {
-            try wait(fd, events: Int16(POLLIN), deadline: deadline, operation: "接收仪表数据")
+            try wait(fd, events: Int16(POLLIN), deadline: deadline, operation: CWL("接收仪表数据"))
             let received = data.withUnsafeMutableBytes { bytes in
                 Darwin.recv(fd, bytes.baseAddress!.advanced(by: offset), count - offset, 0)
             }
@@ -123,7 +123,7 @@ final class TailingSocket: @unchecked Sendable {
                 offset += received
             } else if received == 0 { throw TailingError.closed }
             else if errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR {
-                throw TailingError.system("接收 TCP", errno)
+                throw TailingError.system(CWL("接收 TCP"), errno)
             }
         }
         return data
@@ -137,14 +137,14 @@ final class TailingSocket: @unchecked Sendable {
         let deadline = Self.now + timeout
         var offset = 0
         while offset < data.count {
-            try wait(fd, events: Int16(POLLOUT), deadline: deadline, operation: "发送仪表数据")
+            try wait(fd, events: Int16(POLLOUT), deadline: deadline, operation: CWL("发送仪表数据"))
             let sent = data.withUnsafeBytes {
                 Darwin.send(fd, $0.baseAddress!.advanced(by: offset), data.count - offset, 0)
             }
             if sent > 0 { offset += sent }
             else if sent == 0 { throw TailingError.closed }
             else if errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR {
-                throw TailingError.system("发送 TCP", errno)
+                throw TailingError.system(CWL("发送 TCP"), errno)
             }
         }
     }
@@ -167,7 +167,7 @@ final class TailingSocket: @unchecked Sendable {
         defer { lock.unlock() }
         guard descriptor >= 0 else { throw TailingError.closed }
         let copy = dup(descriptor)
-        guard copy >= 0 else { throw TailingError.system("复制 TCP", errno) }
+        guard copy >= 0 else { throw TailingError.system(CWL("复制 TCP"), errno) }
         operations.enter()
         return copy
     }
@@ -200,7 +200,7 @@ final class TailingSocket: @unchecked Sendable {
     private static func configure(_ fd: Int32) throws {
         let flags = fcntl(fd, F_GETFL, 0)
         guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else {
-            throw TailingError.system("设置 TCP 非阻塞", errno)
+            throw TailingError.system(CWL("设置 TCP 非阻塞"), errno)
         }
         var enabled: Int32 = 1
         _ = setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &enabled, socklen_t(MemoryLayout<Int32>.size))
@@ -214,7 +214,7 @@ final class TailingSocket: @unchecked Sendable {
                 Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        guard result == 0 else { throw TailingError.system("绑定 \(ip):\(port)", errno) }
+        guard result == 0 else { throw TailingError.system(CWL("绑定 {1}:{2}", [String(describing: ip), String(describing: port)]), errno) }
     }
 
     private static func address(_ ip: String, _ port: UInt16) throws -> sockaddr_in {
@@ -223,7 +223,7 @@ final class TailingSocket: @unchecked Sendable {
         address.sin_family = sa_family_t(AF_INET)
         address.sin_port = port.bigEndian
         guard inet_pton(AF_INET, ip, &address.sin_addr) == 1 else {
-            throw TailingError.protocolFailure("IPv4 地址无效")
+            throw TailingError.protocolFailure(CWL("IPv4 地址无效"))
         }
         return address
     }

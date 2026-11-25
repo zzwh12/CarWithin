@@ -37,6 +37,9 @@ struct TailingTests {
         try tailingJPEGSizeSmoke()
         try tailingMediaSmoke()
         #endif
+        try dimensions()
+        try carbitCodes()
+        try cfmotoNegotiationSmoke()
         try frames()
         try identity()
         try socketCancellation()
@@ -45,12 +48,20 @@ struct TailingTests {
         try simulatedInstrument(identity: stableIdentity)
         try simulatedInstrument(identity: stableIdentity, profile: .zeeho62)
         try simulatedInstrument(identity: stableIdentity, profile: .zeeho62)
-        try simulatedInstrument(identity: stableIdentity, profile: .carbit)
-        try carbitCodes()
+        try simulatedInstrument(identity: stableIdentity, profile: .zeehoSEPlus)
+        let alternate = InstrumentFrameSize(width: 854, height: 480)
+        try simulatedInstrument(identity: stableIdentity, profile: .zeehoSEPlus,
+                                reported: alternate, expected: alternate)
+        for size in [InstrumentFrameSize(width: 800, height: 480), InstrumentFrameSize(width: 854, height: 480), InstrumentFrameSize(width: 480, height: 800)] {
+            try simulatedInstrument(identity: stableIdentity, profile: .zeehoAE2, reported: size, expected: size)
+        }
+        try simulatedInstrument(identity: stableIdentity, profile: .carbit,
+                                reported: .init(width: 3840, height: 1200), expected: .init(width: 1920, height: 600))
         try rejectedInstrument()
         try rejectedInstrument(profile: .carbit)
+        print("PASS: Carbit QR parsing, H.264 handshake, display resize and mirroring capability checks")
         try cancelledHandshake()
-        print("PASS: 台铃拆包/合包、长度校验、RSA2048/type1、TCP取消、台铃、极核和亿连模拟握手/逐帧拉取/保活/重启，亿连扫码和宽屏协商、错误型号拒绝、协商中停止")
+        print("PASS: 台铃拆包/合包、长度校验、RSA2048/type1、TCP取消、模拟仪表握手/逐帧拉取/保活/重启、错误型号拒绝、协商中停止")
     }
 
     private static func carbitCodes() throws {
@@ -65,9 +76,9 @@ struct TailingTests {
         for text in ["https://carbit.com.cn/download", "opaque-token", "127.0.0.1", "172.32.0.1", "224.0.0.1", "10.0.0.256"] {
             try expect(CarbitConnectionCode(text).address == nil, "二维码缺少可用地址")
         }
-        let odd = try TailingDisplayProfile.carbit.pictureSize(width: 1281, height: 721)
-        try expect(odd == PXCPictureSize(width: 1280, height: 720), "奇数尺寸向下对齐")
-        try rejects("车机无效尺寸") { _ = try TailingDisplayProfile.carbit.pictureSize(width: 0, height: 720) }
+        let odd = try outputSize(for: .carbit, reportedWidth: 1281, reportedHeight: 721)
+        try expect(odd == InstrumentFrameSize(width: 1280, height: 720), "奇数尺寸向下对齐")
+        try rejects("车机无效尺寸") { _ = try outputSize(for: .carbit, reportedWidth: 0, reportedHeight: 720) }
     }
 
     private static func frames() throws {
@@ -95,6 +106,29 @@ struct TailingTests {
         let envelope = try TailingProtocol.jpeg(jpeg)
         try expect(envelope.uint32LE(0) == 6 && envelope.dropFirst(4) == jpeg, "JPEG小端长度及内容")
         try rejects("不完整 JPEG") { _ = try TailingProtocol.jpeg(Data(jpeg.dropLast())) }
+    }
+
+    private static func outputSize(for profile: TailingDisplayProfile, reportedWidth: Int, reportedHeight: Int) throws -> InstrumentFrameSize {
+        guard let size = profile.outputSize(for: InstrumentFrameSize(width: reportedWidth, height: reportedHeight)) else { throw TailingError.protocolFailure("invalid size") }
+        return size
+    }
+
+    private static func dimensions() throws {
+        for size in [(800, 480), (854, 480), (480, 800), (1024, 488), (1920, 1080)] {
+            let result = try outputSize(for: .zeehoAE2, reportedWidth: size.0, reportedHeight: size.1)
+            try expect(result.width == size.0 && result.height == size.1, "使用仪表上报的尺寸")
+        }
+        let rounded = try outputSize(for: .zeehoAE2, reportedWidth: 855, reportedHeight: 481)
+        try expect(rounded.width == 854 && rounded.height == 480, "H.264 偶数尺寸")
+        for size in [(0, 480), (800, 0), (65535, 480), (800, 65535)] {
+            try rejects("不合理尺寸") { _ = try outputSize(for: .zeehoAE2, reportedWidth: size.0, reportedHeight: size.1) }
+        }
+        try rejects("6.2 寸继续限制型号尺寸") {
+            _ = try outputSize(for: .zeeho62, reportedWidth: 800, reportedHeight: 480)
+        }
+        let legacy = try outputSize(for: .zeeho62, reportedWidth: 1024, reportedHeight: 488)
+        try expect(legacy.height == 480, "保留 6.2 寸的 488 到 480 映射")
+        print("PASS: AE2 协商尺寸与旧型号边界")
     }
 
     private static func identity() throws {
@@ -131,7 +165,11 @@ struct TailingTests {
     }
 
     private static func simulatedInstrument(identity: TailingIdentity, idleControlFrames: Int = 0,
-                                            profile: TailingDisplayProfile = .tailing43) throws {
+                                            profile: TailingDisplayProfile = .tailing43,
+                                            reported: InstrumentFrameSize? = nil, expected: InstrumentFrameSize? = nil) throws {
+        FileHandle.standardError.write(Data("Testing instrument profile: \(profile)\n".utf8))
+        let panel = reported ?? (profile == .zeeho62 ? InstrumentFrameSize(width: 1024, height: 488) : profile.preferredSize)
+        let expectedSize = expected ?? profile.preferredSize
         let announcement = try TailingSocket.listening(localIP: "127.0.0.1", port: 0)
         defer { announcement.close() }
         let reservations = try (0..<3).map { _ in try TailingSocket.listening(localIP: "127.0.0.1", port: 0) }
@@ -148,13 +186,8 @@ struct TailingTests {
         let sawFrame = DispatchSemaphore(value: 0)
         let gotHeartbeat = DispatchSemaphore(value: 0)
         let idleFramesReceived = DispatchSemaphore(value: 0)
-        let h264 = profile.usesH264
-        let name: String, input: (UInt16, UInt16), expected: PXCPictureSize
-        switch profile {
-        case .tailing43: (name, input, expected) = ("TL-DASH-V2", (480, 272), .init(width: 480, height: 272))
-        case .zeeho62: (name, input, expected) = ("ZEEHO-TEST", (1024, 488), .init(width: 1024, height: 480))
-        case .carbit: (name, input, expected) = ("CARBIT-SIM", (3840, 1200), .init(width: 1920, height: 600))
-        }
+        let usesH264 = profile.usesH264
+        let name = profile == .carbit ? "CARBIT-TEST" : profile.isZeeho ? "ZEEHO-TEST" : "TL-DASH-V2"
         let jpeg = Data([0xff, 0xd8, 1, 2, 0xff, 0xd9])
         let accessUnit = Data([0, 0, 0, 1, 0x65, 1, 2, 3])
         DispatchQueue.global().async {
@@ -184,7 +217,7 @@ struct TailingTests {
                 try expect(infoReply.command == 0x10011 && infoReply.identifier == 19, "身份回复")
                 let signature = Data(base64Encoded: info["encryptedHUID"] as! String)!
                 try identity.verify(signature, huid: "SIMULATED-HUID")
-                if profile == .zeeho62 {
+                if profile.isZeeho {
                     let speed = try TailingProtocol.json(["wifiSpeed": 0, "usbSpeed": 0])
                     try primary.write(TailingProtocol.control(0x10690, identifier: 20, payload: speed))
                     let response = try TailingProtocol.readControl { try primary.readExactly($0) }
@@ -193,6 +226,17 @@ struct TailingTests {
                     try primary.write(TailingProtocol.control(0x10780, identifier: 21, payload: runningLog))
                     let logResponse = try TailingProtocol.readControl { try primary.readExactly($0) }
                     try expect(logResponse.command == 0x10781 && logResponse.identifier == 21, "仪表运行日志不得中断协商")
+                    if profile == .zeehoSEPlus {
+                    let notifications: [UInt32] = [0x103b0, 0x103a0, 0x10470, 0x104a0, 0x10020]
+                    for (index, command) in notifications.enumerated() {
+                        let identifier = UInt32(100 + index)
+                        try primary.write(TailingProtocol.control(command, identifier: identifier,
+                            payload: TailingProtocol.json(["test": true])))
+                        let receipt = try TailingProtocol.readControl { try primary.readExactly($0) }
+                        try expect(receipt.command == command + 1 && receipt.identifier == identifier && receipt.payload.isEmpty,
+                                   "MotoPlay 扩展通知不得终止控制通道")
+                    }
+                    }
                     let serialCheck = try TailingProtocol.json(["sn": "TEST-SERIAL"])
                     try primary.write(TailingProtocol.control(0x103e0, identifier: 24, payload: serialCheck))
                     let receipt = try TailingProtocol.readControl { try primary.readExactly($0) }
@@ -202,40 +246,55 @@ struct TailingTests {
                 let reverse = try connect(ports.control)
                 try reverse.write(TailingProtocol.control(0x20000, identifier: 22))
                 try expect(try TailingProtocol.readControl { try reverse.readExactly($0) }.identifier == 22, "反向控制标识")
-                for _ in 0..<(h264 ? 6 : 5) {
+                for _ in 0..<(usesH264 ? 6 : 5) {
                     let m = try TailingProtocol.readControl { try reverse.readExactly($0) }
                     if m.command == 0x20030 {
                         let display = try TailingProtocol.object(m.payload)
                         try expect(display["width"] as? Int == 1320 && display["mode"] as? Int == 1, "手机尺寸不能误用JPEG480宽")
                     }
                     if m.command == 0x20590 {
-                        try expect(h264 && (try TailingProtocol.object(m.payload)["control"] as? Int == 1), "H.264 主动开始投屏")
+                        try expect(usesH264 && (try TailingProtocol.object(m.payload)["control"] as? Int == 1), "极核主动开始投屏")
                     }
                     try reverse.write(TailingProtocol.control(m.command == 0x205a0 ? 0x80000010 : m.command + 1, identifier: m.identifier))
                 }
+                if profile == .zeehoSEPlus {
+                    try reverse.write(TailingProtocol.control(0x103b0, identifier: 109))
+                    let receipt = try TailingProtocol.readControl { try reverse.readExactly($0) }
+                    try expect(receipt.command == 0x103b1 && receipt.identifier == 109 && receipt.payload.isEmpty,
+                               "反向控制通道应确认 0x103b0 并继续媒体协商")
+                }
                 let aux = try connect(ports.auxiliary)
                 var config = Data()
-                config.appendLE(input.0)
-                config.appendLE(input.1)
+                config.appendLE(UInt16(panel.width))
+                config.appendLE(UInt16(panel.height))
                 config.append(Data(repeating: 0, count: 28)); config.append(Data(signature.base64EncodedString().utf8))
                 try aux.write(TailingProtocol.auxiliary(0x10, token: 57, payload: config))
                 let configured = try TailingProtocol.readAuxiliary { try aux.readExactly($0) }
                 try expect(configured.command == 0x11 && configured.token == 57 &&
-                           configured.payload.uint32LE(0) == (h264 ? 2 : 1) &&
-                           configured.payload.uint16LE(4) == expected.width &&
-                           configured.payload.uint16LE(6) == expected.height, "媒体配置回应")
+                           configured.payload.uint32LE(0) == (usesH264 ? 2 : 1) &&
+                           configured.payload.uint16LE(4) == expectedSize.width &&
+                           configured.payload.uint16LE(6) == expectedSize.height, "媒体配置回应")
                 // 连续心跳、启动请求，验证不会丢弃配置后的消息。
                 try aux.write(TailingProtocol.auxiliary(0x40, token: 58) + TailingProtocol.auxiliary(0x70, token: 59))
                 try expect(try TailingProtocol.readAuxiliary { try aux.readExactly($0) }.token == 58, "媒体心跳回应")
                 try expect(try TailingProtocol.readAuxiliary { try aux.readExactly($0) }.command == 0x71, "媒体启动回应")
                 let video = try connect(ports.video)
-                for index in 0..<(h264 ? 2 : 1) {
+                for index in 0..<(usesH264 ? 2 : 1) {
+                    if profile == .carbit, index == 1 {
+                        var resized = Data()
+                        resized.appendLE(UInt16(1280)); resized.appendLE(UInt16(720))
+                        resized.append(config.dropFirst(4))
+                        try aux.write(TailingProtocol.auxiliary(0x10, token: 61, payload: resized))
+                        let reply = try TailingProtocol.readAuxiliary { try aux.readExactly($0) }
+                        try expect(reply.command == 0x11 && reply.token == 61 &&
+                                   reply.payload.uint16LE(4) == 1280 && reply.payload.uint16LE(6) == 720, "亿连更新媒体尺寸")
+                    }
                     try video.write(TailingProtocol.auxiliary(0x72))
-                    if h264 && index == 0 {
+                    if usesH264 && index == 0 {
                         try expect(try video.readExactly(8) == Data(count: 8), "首帧前只写一次零前缀")
                     }
                     let length = Int(try video.readExactly(4).uint32LE(0))
-                    try expect(try video.readExactly(length) == (h264 ? accessUnit : jpeg), "逐帧 TCP 载荷完整写入")
+                    try expect(try video.readExactly(length) == (usesH264 ? accessUnit : jpeg), "逐帧 TCP 载荷完整写入")
                 }
                 sawFrame.signal()
                 let heartbeat = try TailingProtocol.readControl { try reverse.readExactly($0, timeout: 4) }
@@ -256,7 +315,7 @@ struct TailingTests {
                 }
                 idleFramesReceived.signal()
                 // 保持连接，主线程关闭会话以取消下一次视频读取。
-                if h264 {
+                if usesH264 {
                     let stop = try TailingProtocol.readControl { try reverse.readExactly($0, timeout: 2) }
                     try expect(stop.command == 0x20590 && (try TailingProtocol.object(stop.payload)["control"] as? Int == 0),
                                "关闭连接前通知仪表停止投屏")
@@ -265,11 +324,14 @@ struct TailingTests {
                 }
             } catch { result.set(error); sawFrame.signal(); gotHeartbeat.signal(); idleFramesReceived.signal() }
         }
-        try connection.start()
-        try expect(connection.negotiatedSize == expected, "编码器使用协商后的输出尺寸")
-        if h264 {
-            for _ in 0..<2 {
+        let sizeForEncoder = try connection.start()
+        try expect(sizeForEncoder == expectedSize, "编码端尺寸必须与媒体回应一致")
+        if usesH264 {
+            for index in 0..<2 {
                 try connection.waitForH264Request()
+                if profile == .carbit, index == 1 {
+                    try expect(connection.negotiatedSize == InstrumentFrameSize(width: 1280, height: 720), "编码端按新尺寸发送")
+                }
                 try connection.sendH264(accessUnit)
             }
         } else {
@@ -289,7 +351,7 @@ struct TailingTests {
         DispatchQueue.global().async {
             defer { cancelledRead.leave() }
             do {
-                if h264 { try connection.waitForH264Request() }
+                if usesH264 { try connection.waitForH264Request() }
                 else { try connection.sendJPEG(Data([0xff, 0xd8, 0xff, 0xd9])) }
             }
             catch { cancelled.set(true) }

@@ -1,0 +1,4 @@
+"NSBluetoothAlwaysUsageDescription" = "CarWithin uses Bluetooth to discover and connect to CarPlay devices.";
+"NSLocalNetworkUsageDescription" = "CarWithin needs access to your local network to receive CarPlay audio and video and, when you choose, send video or audio to receivers on the same network.";
+"NSLocationWhenInUseUsageDescription" = "CarWithin uses location access only to read the current Wi-Fi network name. It does not collect your location coordinates.";
+"NSMicrophoneUsageDescription" = "CarWithin uses the microphone to send Siri and call audio back to the iPhone.";

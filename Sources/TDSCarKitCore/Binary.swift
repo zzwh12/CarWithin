@@ -6,8 +6,8 @@ public enum ProtocolError: Error, Equatable, CustomStringConvertible, LocalizedE
     public var errorDescription: String? { description }
     public var description: String {
         switch self {
-        case .malformed(let reason): return "数据格式错误：\(reason)"
-        case .limitExceeded(let reason): return "数据超出限制：\(reason)"
+        case .malformed(let reason): return CWL("数据格式错误：{1}", [String(describing: reason)])
+        case .limitExceeded(let reason): return CWL("数据超出限制：{1}", [String(describing: reason)])
         }
     }
 }

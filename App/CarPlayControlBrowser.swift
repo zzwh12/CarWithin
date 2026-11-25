@@ -12,11 +12,11 @@ final class CarPlayControlBrowser {
         let browser = NWBrowser(for: .bonjourWithTXTRecord(type: "_carplay-ctrl._tcp", domain: nil), using: .tcp)
         self.browser = browser
         browser.stateUpdateHandler = { [weak self] state in
-            if case .failed(let error) = state { self?.onLog?("CarPlay 控制服务发现失败：\(error.localizedDescription)") }
+            if case .failed(let error) = state { self?.onLog?(CWL("CarPlay 控制服务发现失败：{1}", [String(describing: error.localizedDescription)])) }
         }
         browser.browseResultsChangedHandler = { [weak self] results, _ in
-            self?.onLog?("发现 \(results.count) 个 CarPlay 控制服务")
-            for result in results { self?.onLog?("CarPlay 控制端点：\(result.endpoint)") }
+            self?.onLog?(CWL("发现 {1} 个 CarPlay 控制服务", [String(describing: results.count)]))
+            for result in results { self?.onLog?(CWL("CarPlay 控制端点：{1}", [String(describing: result.endpoint)])) }
         }
         browser.start(queue: .main)
     }
@@ -64,7 +64,7 @@ final class TDSCarKitReceiverBrowser: NSObject, NetServiceBrowserDelegate, NetSe
     }
     func netServiceBrowser(_ browser: NetServiceBrowser, didNotSearch errorDict: [String: NSNumber]) {
         guard browser === self.browser else { return }
-        onLog?("接收端发现失败：\(errorDict)")
+        onLog?(CWL("接收端发现失败：{1}", [String(describing: errorDict)]))
         onDiscoveryFailure?()
     }
     func netServiceDidResolveAddress(_ sender: NetService) {
@@ -93,7 +93,7 @@ final class TDSCarKitReceiverBrowser: NSObject, NetServiceBrowserDelegate, NetSe
             if serviceType == CarbitConnectionCode.serviceType, !CarbitConnectionCode.isLocalAddress(ip) { continue }
             let target = Target(name: sender.name, address: ip, port: port, deviceID: deviceID ?? ip)
             resolved[ObjectIdentifier(sender)] = target
-            onLog?("发现接收端 \(target.name)，地址 \(target.address):\(target.port)")
+            onLog?(CWL("发现接收端 {1}，地址 {2}:{3}", [String(describing: target.name), String(describing: target.address), String(describing: target.port)]))
             publish(); return
         }
     }

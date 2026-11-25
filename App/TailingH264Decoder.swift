@@ -24,7 +24,7 @@ final class TailingH264Decoder {
     private var formatDescription: CMVideoFormatDescription?
     private let callbackBox = TailingH264DecoderCallbackBox()
     private(set) var nalUnitHeaderLength = 4
-    private(set) var backendDescription = "系统解码"
+    private(set) var backendDescription = CWL("系统解码")
 
     init(
         configuration: Data,
@@ -170,8 +170,8 @@ final class TailingH264Decoder {
             let queried = VTSessionCopyProperty(created, key: kVTDecompressionPropertyKey_UsingHardwareAcceleratedVideoDecoder,
                 allocator: nil, valueOut: &value)
             if queried == noErr, let value {
-                backendDescription = CFBooleanGetValue(value.takeRetainedValue()) ? "硬件解码" : "CPU 软件解码"
-            } else { backendDescription = "请求 CPU 软件解码（系统未提供类型查询）" }
+                backendDescription = CFBooleanGetValue(value.takeRetainedValue()) ? CWL("硬件解码") : CWL("CPU 软件解码")
+            } else { backendDescription = CWL("请求 CPU 软件解码（系统未提供类型查询）") }
         }
         _ = VTSessionSetProperty(created, key: kVTDecompressionPropertyKey_RealTime, value: kCFBooleanTrue)
     }
@@ -226,15 +226,15 @@ enum TailingH264DecoderError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidConfiguration: "台铃输出 H.264 配置不是有效的 avcC 数据"
-        case .missingParameterSets: "台铃输出 H.264 配置缺少 SPS/PPS"
-        case .format(let code): "创建 H.264 解码格式失败（\(code)）"
-        case .create(let code): "创建 VideoToolbox 解码器失败（\(code)）"
-        case .blockBuffer(let code): "创建视频压缩数据块失败（\(code)）"
-        case .blockCopy(let code): "复制视频压缩数据失败（\(code)）"
-        case .sampleBuffer(let code): "创建视频样本失败（\(code)）"
-        case .decode(let code): "VideoToolbox 解码失败（\(code)）"
-        case .invalidated: "H.264 解码器已停止"
+        case .invalidConfiguration: CWL("台铃输出 H.264 配置不是有效的 avcC 数据")
+        case .missingParameterSets: CWL("台铃输出 H.264 配置缺少 SPS/PPS")
+        case .format(let code): CWL("创建 H.264 解码格式失败（{1}）", [String(describing: code)])
+        case .create(let code): CWL("创建 VideoToolbox 解码器失败（{1}）", [String(describing: code)])
+        case .blockBuffer(let code): CWL("创建视频压缩数据块失败（{1}）", [String(describing: code)])
+        case .blockCopy(let code): CWL("复制视频压缩数据失败（{1}）", [String(describing: code)])
+        case .sampleBuffer(let code): CWL("创建视频样本失败（{1}）", [String(describing: code)])
+        case .decode(let code): CWL("VideoToolbox 解码失败（{1}）", [String(describing: code)])
+        case .invalidated: CWL("H.264 解码器已停止")
         }
     }
 }

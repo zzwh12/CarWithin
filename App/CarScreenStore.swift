@@ -13,7 +13,7 @@ struct CarScreen: Codable, Equatable {
     var key: String { profileKey ?? "\(width)x\(height)" }
     var title: String { "\(width) × \(height)\(refreshHz > 0 ? " · \(refreshHz) Hz" : "")" }
     var subtitle: String {
-        "像素比 \(String(format: "%g", devicePixelRatio)) · H.265 \(supportsH265 ? "可硬解" : "不可硬解") · 上次使用 "
+        CWL("像素比 {1} · H.265 {2} · 上次使用 ", [String(describing: String(format: "%g", devicePixelRatio)), String(describing: supportsH265 ? CWL("可硬解") : CWL("不可硬解"))])
             + DateFormatter.localizedString(from: lastUsed, dateStyle: .short, timeStyle: .short)
     }
 }
