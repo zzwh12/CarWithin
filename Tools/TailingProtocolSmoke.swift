@@ -59,7 +59,7 @@ struct TailingTests {
                                 reported: .init(width: 3840, height: 1200), expected: .init(width: 1920, height: 600))
         try rejectedInstrument()
         try rejectedInstrument(profile: .carbit)
-        print("PASS: Carbit QR parsing, H.264 handshake, display resize and mirroring capability checks")
+        print("PASS: Carbit QR parsing, 0x103a0 on both control sockets, H.264 frames, display resize and mirroring capability checks")
         try cancelledHandshake()
         print("PASS: 台铃拆包/合包、长度校验、RSA2048/type1、TCP取消、模拟仪表握手/逐帧拉取/保活/重启、错误型号拒绝、协商中停止")
     }
@@ -210,6 +210,14 @@ struct TailingTests {
                 try primary.write(Data(head.prefix(5)))
                 try primary.write(Data(head.dropFirst(5)))
                 try expect(try TailingProtocol.readControl { try primary.readExactly($0) }.identifier == 17, "主控制回显标识")
+                if profile == .carbit {
+                    let identifier: UInt32 = 0x9a000001
+                    try primary.write(TailingProtocol.control(0x103a0, identifier: identifier,
+                        payload: TailingProtocol.json(["port": 21000])))
+                    let receipt = try TailingProtocol.readControl { try primary.readExactly($0) }
+                    try expect(receipt.command == 0x103a1 && receipt.identifier == identifier && receipt.payload.isEmpty,
+                               "亿连在设备信息交换前应确认 0x103a0")
+                }
                 try primary.write(TailingProtocol.control(0x10010, identifier: 19,
                     payload: TailingProtocol.json(["HUName": name, "supportScreenMirroring": true, "HUID": "SIMULATED-HUID"])))
                 let infoReply = try TailingProtocol.readControl { try primary.readExactly($0) }
@@ -257,11 +265,12 @@ struct TailingTests {
                     }
                     try reverse.write(TailingProtocol.control(m.command == 0x205a0 ? 0x80000010 : m.command + 1, identifier: m.identifier))
                 }
-                if profile == .zeehoSEPlus {
-                    try reverse.write(TailingProtocol.control(0x103b0, identifier: 109))
+                if profile == .zeehoSEPlus || profile == .carbit {
+                    let notification: UInt32 = profile == .carbit ? 0x103a0 : 0x103b0
+                    try reverse.write(TailingProtocol.control(notification, identifier: 109))
                     let receipt = try TailingProtocol.readControl { try reverse.readExactly($0) }
-                    try expect(receipt.command == 0x103b1 && receipt.identifier == 109 && receipt.payload.isEmpty,
-                               "反向控制通道应确认 0x103b0 并继续媒体协商")
+                    try expect(receipt.command == notification + 1 && receipt.identifier == 109 && receipt.payload.isEmpty,
+                               "反向控制通道应确认通知并继续媒体协商")
                 }
                 let aux = try connect(ports.auxiliary)
                 var config = Data()

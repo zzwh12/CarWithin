@@ -326,10 +326,10 @@ final class TailingConnection: @unchecked Sendable {
             case 0x20021, 0x20031, 0x204c1, 0x20491, 0x20051, 0x20591, 0x205a1, 0x70000001:
                 continue // 回应不再回应，避免往返循环。
             default:
-                if let acknowledgement = try TailingProtocol.zeehoExtensionReply(to: request, profile: profile) {
+                if let acknowledgement = try TailingProtocol.notificationReceipt(to: request, profile: profile) {
                     try socket.write(acknowledgement)
-                    log(String(format: "极核扩展通知 0x%08x（%d 字节），已回复 0x%08x 接收确认",
-                               request.command, request.payload.count, request.command + 1))
+                    let exchange = String(format: "0x%08x → 0x%08x", request.command, request.command + 1)
+                    log(CWL("{1}已确认 PXC 通知 {2}（{3} 字节）", [profile.name, exchange, String(request.payload.count)]))
                     continue
                 }
                 throw TailingError.protocolFailure(String(format: CWL("未支持的协商命令 0x%08x"), request.command))

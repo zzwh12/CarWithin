@@ -18960,6 +18960,23 @@
         }
       }
     },
+    "{1}已确认 PXC 通知 {2}（{3} 字节）": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "{1} acknowledged PXC notification {2} ({3} bytes)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "{1}已确认 PXC 通知 {2}（{3} 字节）"
+          }
+        }
+      }
+    },
     "PXC 会话已关闭": {
       "extractionState": "manual",
       "localizations": {

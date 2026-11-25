@@ -37,12 +37,12 @@ enum TailingProtocol {
         return Control(command: command, identifier: head.uint32LE(12), payload: payload)
     }
 
-    /// MotoPlay waits for an empty, identifier-preserving ack for these notifications.
-    /// Commands that require a response body retain their dedicated handlers.
-    static func zeehoExtensionReply(to request: Control, profile: TailingDisplayProfile) throws -> Data? {
-        guard profile == .zeehoSEPlus else { return nil }
-        switch request.command {
-        case 0x103b0, 0x103a0, 0x10470, 0x104a0, 0x10020:
+    /// Acknowledge the notifications observed for each receiver with an empty body and the same identifier.
+    static func notificationReceipt(to request: Control, profile: TailingDisplayProfile) throws -> Data? {
+        switch (profile, request.command) {
+        case (.carbit, 0x103a0), (.zeehoSEPlus, 0x103a0), // FTP info notification
+             (.zeehoSEPlus, 0x103b0), (.zeehoSEPlus, 0x10470),
+             (.zeehoSEPlus, 0x104a0), (.zeehoSEPlus, 0x10020):
             return try control(request.command + 1, identifier: request.identifier)
         default:
             return nil
