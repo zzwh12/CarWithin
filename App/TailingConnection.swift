@@ -408,6 +408,7 @@ final class TailingConnection: @unchecked Sendable {
     }
 
     private func auxiliary(_ socket: TailingSocket) throws {
+        var dumpedScreenEvents = 0
         while true {
             // 此通道可能长时间空闲，停止通过 shutdown 唤醒。
             var readingHeader = true
@@ -459,7 +460,15 @@ final class TailingConnection: @unchecked Sendable {
                 response = 0x31; payload.appendLE(UInt32(5002)); payload.appendLE(UInt32(1))
             case 0x60:
                 response = 0x61; payload = try TailingProtocol.json(["supportFunction": 0])
-            case 0x20: continue // 不执行反控触摸。
+            case 0x20:
+                // 亿连 EP SDK 屏幕事件（0x20：u16 类型@0、u32 坐标域@2、u16 槽位@6、u16 按键码@8，18 字节）
+                // 格式验证期：记录原始字节，暂不执行反控。
+                dumpedScreenEvents += 1
+                if dumpedScreenEvents <= 100 {
+                    let hex = request.payload.map { String(format: "%02x", $0) }.joined(separator: " ")
+                    log("亿连屏幕事件 #\(dumpedScreenEvents)（\(request.payload.count) 字节）：\(hex)")
+                }
+                continue
             default:
                 response = 0x7f02
                 log(String(format: CWL("媒体控制通道暂不支持 0x%04x"), request.command))
