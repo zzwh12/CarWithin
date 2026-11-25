@@ -59,7 +59,7 @@ struct TailingTests {
                                 reported: .init(width: 3840, height: 1200), expected: .init(width: 1920, height: 600))
         try rejectedInstrument()
         try rejectedInstrument(profile: .carbit)
-        print("PASS: Carbit QR parsing, 0x103a0 on both control sockets, H.264 frames, display resize and mirroring capability checks")
+        print("PASS: Carbit QR parsing, consecutive 0x103a0/0x10020 receipts on both control sockets, H.264 frames, display resize and mirroring capability checks")
         try cancelledHandshake()
         print("PASS: 台铃拆包/合包、长度校验、RSA2048/type1、TCP取消、模拟仪表握手/逐帧拉取/保活/重启、错误型号拒绝、协商中停止")
     }
@@ -164,6 +164,22 @@ struct TailingTests {
         try expect(group.wait(timeout: .now() + 1) == .success && result.get() != nil, "关闭必须唤醒accept")
     }
 
+    private static func checkCarbitNotifications(on socket: TailingSocket, firstIdentifier: UInt32) throws {
+        let featuresIdentifier = firstIdentifier + 1
+        let ftpInfo = try TailingProtocol.control(0x103a0, identifier: firstIdentifier,
+            payload: TailingProtocol.json(["port": 21000]))
+        let mediaFeatures = try TailingProtocol.control(0x10020, identifier: featuresIdentifier,
+            payload: TailingProtocol.json(["music": true, "tts": false, "vr": false]))
+        try socket.write(ftpInfo + mediaFeatures)
+
+        let ftpReceipt = try TailingProtocol.readControl { try socket.readExactly($0) }
+        try expect(ftpReceipt == .init(command: 0x103a1, identifier: firstIdentifier, payload: Data()),
+                   "亿连 0x103a0 应收到带原请求编号的空回执")
+        let featuresReceipt = try TailingProtocol.readControl { try socket.readExactly($0) }
+        try expect(featuresReceipt == .init(command: 0x10021, identifier: featuresIdentifier, payload: Data()),
+                   "亿连 0x10020 应收到带原请求编号的空回执")
+    }
+
     private static func simulatedInstrument(identity: TailingIdentity, idleControlFrames: Int = 0,
                                             profile: TailingDisplayProfile = .tailing43,
                                             reported: InstrumentFrameSize? = nil, expected: InstrumentFrameSize? = nil) throws {
@@ -211,12 +227,7 @@ struct TailingTests {
                 try primary.write(Data(head.dropFirst(5)))
                 try expect(try TailingProtocol.readControl { try primary.readExactly($0) }.identifier == 17, "主控制回显标识")
                 if profile == .carbit {
-                    let identifier: UInt32 = 0x9a000001
-                    try primary.write(TailingProtocol.control(0x103a0, identifier: identifier,
-                        payload: TailingProtocol.json(["port": 21000])))
-                    let receipt = try TailingProtocol.readControl { try primary.readExactly($0) }
-                    try expect(receipt.command == 0x103a1 && receipt.identifier == identifier && receipt.payload.isEmpty,
-                               "亿连在设备信息交换前应确认 0x103a0")
+                    try checkCarbitNotifications(on: primary, firstIdentifier: 0x9a000001)
                 }
                 try primary.write(TailingProtocol.control(0x10010, identifier: 19,
                     payload: TailingProtocol.json(["HUName": name, "supportScreenMirroring": true, "HUID": "SIMULATED-HUID"])))
@@ -265,11 +276,12 @@ struct TailingTests {
                     }
                     try reverse.write(TailingProtocol.control(m.command == 0x205a0 ? 0x80000010 : m.command + 1, identifier: m.identifier))
                 }
-                if profile == .zeehoSEPlus || profile == .carbit {
-                    let notification: UInt32 = profile == .carbit ? 0x103a0 : 0x103b0
-                    try reverse.write(TailingProtocol.control(notification, identifier: 109))
+                if profile == .carbit {
+                    try checkCarbitNotifications(on: reverse, firstIdentifier: 109)
+                } else if profile == .zeehoSEPlus {
+                    try reverse.write(TailingProtocol.control(0x103b0, identifier: 109))
                     let receipt = try TailingProtocol.readControl { try reverse.readExactly($0) }
-                    try expect(receipt.command == notification + 1 && receipt.identifier == 109 && receipt.payload.isEmpty,
+                    try expect(receipt.command == 0x103b1 && receipt.identifier == 109 && receipt.payload.isEmpty,
                                "反向控制通道应确认通知并继续媒体协商")
                 }
                 let aux = try connect(ports.auxiliary)

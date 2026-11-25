@@ -23,7 +23,8 @@ struct ZeehoControlSmoke {
             }
             precondition(response.payload.isEmpty && response.identifier == identifier)
             let carbitReply = try TailingProtocol.notificationReceipt(to: request, profile: .carbit)
-            precondition(carbitReply == (command == 0x103a0 ? encoded : nil))
+            let carbitNotification = command == 0x103a0 || command == 0x10020
+            precondition(carbitReply == (carbitNotification ? encoded : nil))
             for otherProfile: TailingDisplayProfile in [.zeeho62, .zeehoAE2, .tailing43] {
                 let excluded = try TailingProtocol.notificationReceipt(to: request, profile: otherProfile)
                 precondition(excluded == nil)
@@ -41,6 +42,6 @@ struct ZeehoControlSmoke {
             }
         }
         precondition(TailingError.protocolFailure("test").localizedDescription.contains("PXC"))
-        print("PASS: Carbit 0x103a0 and five SE+ notification receipts, profile isolation, identifiers, empty payloads and reply-loop exclusion")
+        print("PASS: Carbit 0x103a0/0x10020 and five SE+ notification receipts, profile isolation, identifiers, empty payloads and reply-loop exclusion")
     }
 }
