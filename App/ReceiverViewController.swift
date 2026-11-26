@@ -2589,7 +2589,7 @@ extension ReceiverViewController {
                 rows.append(.control(CWL("CarPlay 图标大小"), icon: ("square.grid.2x2.fill", .systemPurple), iconSizeControl))
                 return [
                     SettingsSection(CWL("亿连画面"), footer: CWL("按车机请求的尺寸等比缩放 CarPlay 画面，宽高比不同时保留黑边。"), [
-                        .info(CWL("车机视频"), CWL("H.264 · 最高 1920×1080 · 30 FPS"))
+                        .info(CWL("车机视频"), CWL("H.264 / JPEG · 最高 1920×1080 · 30 FPS"))
                     ]),
                     SettingsSection(CWL("本机 CarPlay"), rows)
                 ]
@@ -3011,7 +3011,7 @@ extension ReceiverViewController {
         }
         rows.append(.field(CWL("车机 IP"), carbitAddressField, placeholder: CWL("车机的局域网 IPv4")))
         rows.append(.note(carbitStatus))
-        return [SettingsSection(CWL("亿连直连（实验）"), footer: CWL("在车机打开亿连，iPhone 加入与车机互通的 Wi-Fi 并保存同名预设。CarWithin 直接与车机协商 H.264 视频。声音走 iPhone 或蓝牙，触控在 iPhone 上操作。"), rows)]
+        return [SettingsSection(CWL("亿连直连（实验）"), footer: CWL("在车机打开亿连，iPhone 加入与车机互通的 Wi-Fi 并保存同名预设。CarWithin 按车机请求发送 H.264 或 JPEG 画面。声音走 iPhone 或蓝牙，触控在 iPhone 上操作。"), rows)]
     }
 
     private func carbitDiscoveryPage() -> SettingsPageController {

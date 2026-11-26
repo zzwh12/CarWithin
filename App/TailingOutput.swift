@@ -280,14 +280,19 @@ final class TailingOutputSession: @unchecked Sendable {
 enum TailingJPEGEncoder {
     static let byteLimit = 24 * 1024
 
+    static func representation(of image: CIImage, context: CIContext, colorSpace: CGColorSpace,
+                               quality: Int = 80) throws -> Data {
+        guard let data = context.jpegRepresentation(of: image, colorSpace: colorSpace,
+            options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: CGFloat(quality) / 100]) else {
+            throw EncodingError.unavailable
+        }
+        return data
+    }
+
     static func encode(_ image: CIImage, context: CIContext, colorSpace: CGColorSpace,
                        quality: Int = 80) throws -> (data: Data, reduced: Bool) {
         func jpeg(_ source: CIImage, _ quality: Int) throws -> Data {
-            guard let data = context.jpegRepresentation(of: source, colorSpace: colorSpace,
-                options: [kCGImageDestinationLossyCompressionQuality as CIImageRepresentationOption: CGFloat(quality) / 100]) else {
-                throw EncodingError.unavailable
-            }
-            return data
+            try representation(of: source, context: context, colorSpace: colorSpace, quality: quality)
         }
         let quality = min(100, max(0, quality))
         let original = try jpeg(image, quality)

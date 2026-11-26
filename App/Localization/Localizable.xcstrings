@@ -18382,19 +18382,19 @@
         }
       }
     },
-    "在车机打开亿连，iPhone 加入与车机互通的 Wi-Fi 并保存同名预设。CarWithin 直接与车机协商 H.264 视频。声音走 iPhone 或蓝牙，触控在 iPhone 上操作。": {
+    "在车机打开亿连，iPhone 加入与车机互通的 Wi-Fi 并保存同名预设。CarWithin 按车机请求发送 H.264 或 JPEG 画面。声音走 iPhone 或蓝牙，触控在 iPhone 上操作。": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open CarbitLink on the head unit. Connect your iPhone to its Wi-Fi and save a preset with the same network name. CarWithin sends H.264 directly to the head unit. Use the iPhone for touch and the iPhone or Bluetooth for audio."
+            "value": "Open CarbitLink on the head unit. Connect your iPhone to its Wi-Fi and save a preset with the same network name. CarWithin sends H.264 or JPEG according to the format requested by the head unit. Use the iPhone for touch and the iPhone or Bluetooth for audio."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在车机打开亿连，iPhone 加入与车机互通的 Wi-Fi 并保存同名预设。CarWithin 直接与车机协商 H.264 视频。声音走 iPhone 或蓝牙，触控在 iPhone 上操作。"
+            "value": "在车机打开亿连，iPhone 加入与车机互通的 Wi-Fi 并保存同名预设。CarWithin 按车机请求发送 H.264 或 JPEG 画面。声音走 iPhone 或蓝牙，触控在 iPhone 上操作。"
           }
         }
       }
@@ -18688,19 +18688,19 @@
         }
       }
     },
-    "H.264 · 最高 1920×1080 · 30 FPS": {
+    "H.264 / JPEG · 最高 1920×1080 · 30 FPS": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "H.264 · Up to 1920×1080 · 30 FPS"
+            "value": "H.264 / JPEG · Up to 1920×1080 · 30 FPS"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "H.264 · 最高 1920×1080 · 30 FPS"
+            "value": "H.264 / JPEG · 最高 1920×1080 · 30 FPS"
           }
         }
       }
@@ -18756,19 +18756,87 @@
         }
       }
     },
-    "正在发送 · {1} · H.264": {
+    "亿连车机请求 · {1} FPS · wantEncoder={2} · supportCodec={3}": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sending · {1} · H.264"
+            "value": "Carbit head unit request · {1} FPS · wantEncoder={2} · supportCodec={3}"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "正在发送 · {1} · H.264"
+            "value": "亿连车机请求 · {1} FPS · wantEncoder={2} · supportCodec={3}"
+          }
+        }
+      }
+    },
+    "亿连视频首包 · {1} 字节 · JPEG": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First Carbit video packet · {1} bytes · JPEG"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "亿连视频首包 · {1} 字节 · JPEG"
+          }
+        }
+      }
+    },
+    "等待 CarPlay 画面": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting for the CarPlay picture"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "等待 CarPlay 画面"
+          }
+        }
+      }
+    },
+    "亿连视频首包 · {1} 字节 · NAL {2}": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "First Carbit video packet · {1} bytes · NAL {2}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "亿连视频首包 · {1} 字节 · NAL {2}"
+          }
+        }
+      }
+    },
+    "正在发送 · {1} · {2}": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sending · {1} · {2}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在发送 · {1} · {2}"
           }
         }
       }

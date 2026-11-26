@@ -126,16 +126,17 @@ final class NativeReceiver {
                         onLog: { [weak self] in self?.log($0) },
                         requestKeyframe: { [weak self] in self?.requestKeyFrame(reason: "极核 6.2 寸解码恢复") })
                 } else {
-                    self.pxcVideoOutput.start(localAddress: configuration.address,
-                        targetAddress: profile.isZeeho && configuration.zeehoAutomaticAddress ? "" : target,
-                        profile: profile, frameRate: profile == .carbit ? .fps30 : configuration.zeehoFrameRate,
+                    let connection = TailingConnection(localIP: configuration.address,
+                        targetIP: profile.isZeeho && configuration.zeehoAutomaticAddress ? "" : target,
+                        profile: profile, phone: phone, log: { [weak self] in self?.log($0) })
+                    self.pxcVideoOutput.start(connection: connection,
+                        frameRate: profile == .carbit ? .fps30 : configuration.zeehoFrameRate,
                         videoMode: configuration.zeehoVideoMode,
-                        sourceSize: InstrumentFrameSize(width: configuration.width, height: configuration.height), phone: phone,
+                        sourceSize: InstrumentFrameSize(width: configuration.width, height: configuration.height),
                         onState: { [weak self] message in
                             if profile == .carbit { self?.onCarbitState?(message) }
                             else { self?.onZeehoState?(message) }
                         },
-                        onLog: { [weak self] in self?.log($0) },
                         requestKeyframe: { [weak self] in self?.requestKeyFrame(reason: CWL("{1}解码恢复", [profile.name])) })
                 }
             }

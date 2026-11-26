@@ -11,71 +11,102 @@ private final class MediaBox<Value>: @unchecked Sendable {
     func set(_ value: Value) { lock.lock(); self.value = value; lock.unlock() }
     func get() -> Value { lock.lock(); defer { lock.unlock() }; return value }
 }
+// The standalone media test compiles the output without the iPhone receiver settings.
+struct ConfigurationError: LocalizedError {
+    let message: String
+    init(_ message: String) { self.message = message }
+    var errorDescription: String? { message }
+}
+
 private struct MediaSmokeError: Error { let message: String }
 private func require(_ value: Bool, _ message: String) throws {
     if !value { throw MediaSmokeError(message: message) }
 }
 
-/// Real VT H.264 → decoder → Core Image JPEG → pull-frame socket round trip on loopback.
-func tailingMediaSmoke() throws {
-    let encoded = MediaBox<Data?>(nil)
-    let failure = MediaBox<Error?>(nil)
-    var encoder: VTCompressionSession?
-    let status = VTCompressionSessionCreate(allocator: nil, width: 960, height: 544,
-        codecType: kCMVideoCodecType_H264, encoderSpecification: nil, imageBufferAttributes: nil,
-        compressedDataAllocator: nil, outputCallback: { ref, _, status, _, sample in
-            guard let ref, status == noErr, let sample, let format = CMSampleBufferGetFormatDescription(sample),
-                  let block = CMSampleBufferGetDataBuffer(sample) else { return }
-            let box = Unmanaged<MediaBox<Data?>>.fromOpaque(ref).takeUnretainedValue()
-            var output = Data()
-            for index in 0..<2 {
-                var pointer: UnsafePointer<UInt8>?
-                var count = 0
-                if CMVideoFormatDescriptionGetH264ParameterSetAtIndex(format, parameterSetIndex: index,
-                    parameterSetPointerOut: &pointer, parameterSetSizeOut: &count,
-                    parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil) == noErr, let pointer {
-                    output.append(contentsOf: [0, 0, 0, 1]); output.append(pointer, count: count)
-                }
-            }
-            var data = Data(count: CMBlockBufferGetDataLength(block))
-            let size = data.count
-            let copied = data.withUnsafeMutableBytes { CMBlockBufferCopyDataBytes(block,
-                atOffset: 0, dataLength: size, destination: $0.baseAddress!) }
-            guard copied == noErr else { return }
-            var offset = 0
-            while offset + 4 <= data.count {
-                let length = (offset..<offset + 4).reduce(0) { ($0 << 8) | Int(data[$1]) }
-                offset += 4
-                guard length > 0, offset + length <= data.count else { return }
-                output.append(contentsOf: [0, 0, 0, 1]); output.append(data[offset..<offset + length])
-                offset += length
-            }
-            box.set(output)
-        }, refcon: Unmanaged.passUnretained(encoded).toOpaque(), compressionSessionOut: &encoder)
-    try require(status == noErr && encoder != nil, "创建真实 H.264 编码器")
-    guard let encoder else { return }
-    defer { VTCompressionSessionInvalidate(encoder) }
-    VTSessionSetProperty(encoder, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
-    var buffer: CVPixelBuffer?
-    try require(CVPixelBufferCreate(nil, 960, 544, kCVPixelFormatType_32BGRA,
-        [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer) == kCVReturnSuccess, "创建测试画面")
-    guard let buffer else { return }
+func makeH264TestBars(_ size: InstrumentFrameSize) throws -> Data {
+    let encoded = MediaBox<Result<H264EncodedFrame, Error>?>(nil)
+    let encoder = try H264Encoder(width: size.width, height: size.height, fps: 25, bitrate: 4_000_000) {
+        encoded.set($0)
+    }
+    defer { encoder.invalidate() }
+    var pixelBuffer: CVPixelBuffer?
+    let status = CVPixelBufferCreate(nil, size.width, size.height, kCVPixelFormatType_32BGRA,
+        [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &pixelBuffer)
+    guard status == kCVReturnSuccess, let buffer = pixelBuffer else { throw MediaSmokeError(message: "创建测试画面失败") }
     CVPixelBufferLockBaseAddress(buffer, [])
     let stride = CVPixelBufferGetBytesPerRow(buffer)
     let base = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt8.self)
-    for y in 0..<544 {
-        for x in 0..<960 {
+    for y in 0..<size.height {
+        for x in 0..<size.width {
             let offset = y * stride + x * 4
-            base[offset] = x < 480 ? 0 : 255
-            base[offset + 1] = 0; base[offset + 2] = x < 480 ? 255 : 0; base[offset + 3] = 255
+            let left = x < size.width / 2
+            base[offset] = left ? 0 : 255
+            base[offset + 1] = 0
+            base[offset + 2] = left ? 255 : 0
+            base[offset + 3] = 255
         }
     }
     CVPixelBufferUnlockBaseAddress(buffer, [])
-    try require(VTCompressionSessionEncodeFrame(encoder, imageBuffer: buffer, presentationTimeStamp: .zero,
-        duration: CMTime(value: 1, timescale: 30), frameProperties: nil, sourceFrameRefcon: nil,
-        infoFlagsOut: nil) == noErr, "编码 H.264 首帧")
-    VTCompressionSessionCompleteFrames(encoder, untilPresentationTimeStamp: .invalid)
-    guard let accessUnit = encoded.get() else { throw MediaSmokeError(message: "未生成 H.264 数据") }
+    try encoder.encode(buffer, presentationTime: .zero, forceKeyframe: true)
+    encoder.complete()
+    guard let result = encoded.get() else { throw MediaSmokeError(message: "未生成 H.264 首帧") }
+    return try result.get().data
+}
+
+func verifyH264TestBars(_ data: Data, size: InstrumentFrameSize) throws {
+    var parameters = VideoParameterSets(codec: .h264)
+    var picture: [Data] = []
+    for unit in try AnnexB.units(in: data) {
+        if VideoCodec.h264.parameterSet(unit) != nil { _ = parameters.absorb(unit) }
+        else { picture.append(unit) }
+    }
+    try require(parameters.isComplete && picture.contains { VideoCodec.h264.nalType($0) == 5 },
+                "亿连首帧需包含 SPS、PPS 和 IDR")
+    let image = MediaBox<CVPixelBuffer?>(nil)
+    let failure = MediaBox<Error?>(nil)
+    let decoder = try TailingH264Decoder(configuration: parameters.decoderConfigurationRecord(),
+        output: { image.set($0) }, failure: { failure.set($0) })
+    try decoder.decode(AnnexB.lengthPrefixed(picture), presentationTimeMicroseconds: 0, isKeyframe: true)
+    decoder.waitForFrames()
+    if let error = failure.get() { throw error }
+    guard let buffer = image.get() else { throw MediaSmokeError(message: "亿连首帧没有解出画面") }
+    try require(CVPixelBufferGetWidth(buffer) == size.width && CVPixelBufferGetHeight(buffer) == size.height,
+                "解码首帧应匹配协商的尺寸")
+    CVPixelBufferLockBaseAddress(buffer, .readOnly)
+    defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+    let bytes = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt8.self)
+    let row = size.height / 2 * CVPixelBufferGetBytesPerRow(buffer)
+    let left = row + (size.width / 4) * 4
+    let right = row + (size.width * 3 / 4) * 4
+    try require(bytes[left + 2] > 200 && bytes[left] < 50 && bytes[right] > 200 && bytes[right + 2] < 50,
+                "亿连接收的 H.264 应解出左红右蓝的测试画面")
+}
+
+func verifyJPEGTestBars(_ data: Data, size: InstrumentFrameSize) throws {
+    guard data.starts(with: [0xff, 0xd8]), let source = CGImageSourceCreateWithData(data as CFData, nil),
+          let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+        throw MediaSmokeError(message: "JPEG 不可解码")
+    }
+    try require(image.width == size.width && image.height == size.height, "JPEG 应匹配协商的尺寸")
+    var pixels = [UInt8](repeating: 0, count: size.width * size.height * 4)
+    try pixels.withUnsafeMutableBytes { bytes in
+        guard let context = CGContext(data: bytes.baseAddress, width: size.width, height: size.height,
+            bitsPerComponent: 8, bytesPerRow: size.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+            throw MediaSmokeError(message: "无法读取 JPEG 像素")
+        }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: size.width, height: size.height))
+    }
+    let left = (size.height / 2 * size.width + size.width / 4) * 4
+    let right = (size.height / 2 * size.width + size.width * 3 / 4) * 4
+    try require(pixels[left] > 220 && pixels[left + 2] < 35 && pixels[right + 2] > 220 && pixels[right] < 35,
+                "JPEG 应解出左红右蓝的测试画面")
+}
+
+/// Real VT H.264 → decoder → Core Image JPEG → pull-frame socket round trip on loopback.
+func tailingMediaSmoke() throws {
+    let accessUnit = try makeH264TestBars(.init(width: 960, height: 544))
+    let failure = MediaBox<Error?>(nil)
 
     let announcement = try TailingSocket.listening(localIP: "127.0.0.1", port: 0)
     defer { announcement.close() }
@@ -125,23 +156,7 @@ func tailingMediaSmoke() throws {
                 let jpeg = try video.readExactly(length)
                 if let previous { try require(jpeg == previous, "静态画面复用最新 JPEG") }
                 previous = jpeg
-                guard let source = CGImageSourceCreateWithData(jpeg as CFData, nil),
-                      let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
-                    throw MediaSmokeError(message: "JPEG 不可解码")
-                }
-                try require(image.width == 480 && image.height == 272, "JPEG 固定 480×272")
-                var pixels = [UInt8](repeating: 0, count: 480 * 272 * 4)
-                try pixels.withUnsafeMutableBytes { bytes in
-                    guard let context = CGContext(data: bytes.baseAddress, width: 480, height: 272,
-                        bitsPerComponent: 8, bytesPerRow: 480 * 4, space: CGColorSpaceCreateDeviceRGB(),
-                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
-                        throw MediaSmokeError(message: "JPEG 像素读取")
-                    }
-                    context.draw(image, in: CGRect(x: 0, y: 0, width: 480, height: 272))
-                }
-                let left = (136 * 480 + 100) * 4, right = (136 * 480 + 380) * 4
-                try require(pixels[left] > 220 && pixels[left + 2] < 35 && pixels[right + 2] > 220 && pixels[right] < 35,
-                            "红蓝通道、比例及左右方向正确")
+                try verifyJPEGTestBars(jpeg, size: .init(width: 480, height: 272))
             }
         } catch { failure.set(error) }
     }

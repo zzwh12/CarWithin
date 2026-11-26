@@ -40,11 +40,11 @@ extension TailingDisplayProfile {
 final class TailingConnection: @unchecked Sendable {
     private let localIP: String
     private var targetIP: String
-    private let profile: TailingDisplayProfile
+    let profile: TailingDisplayProfile
     private let phone: TailingPhoneInfo
     private let ports: TailingPorts
     private let identityProvider: () throws -> TailingIdentity
-    private let log: (String) -> Void
+    let log: (String) -> Void
     private let condition = NSCondition()
     private var resources: [TailingSocket] = []
     private var timers: [DispatchSourceTimer] = []
@@ -56,14 +56,10 @@ final class TailingConnection: @unchecked Sendable {
     private var signedHUID: Data?
     private var video: TailingSocket?
     private var reverseControl: TailingSocket?
-    private var sentH264Prefix = false
+    private var lastSentFormat: TailingVideoFormat?
     private var mediaStarted = false
-    private var mediaSize: InstrumentFrameSize?
+    private var media: (size: InstrumentFrameSize, format: TailingVideoFormat)?
     private var isZeeho: Bool { profile.isZeeho }
-    var negotiatedSize: InstrumentFrameSize? {
-        condition.lock(); defer { condition.unlock() }
-        return mediaSize
-    }
 
     init(localIP: String, targetIP: String, profile: TailingDisplayProfile, phone: TailingPhoneInfo,
          ports: TailingPorts = .ios, identityProvider: @escaping () throws -> TailingIdentity = TailingIdentity.load,
@@ -119,42 +115,57 @@ final class TailingConnection: @unchecked Sendable {
             if !condition.wait(until: deadline) { throw TailingError.timeout(CWL("媒体会话未就绪，请在目标设备重新打开投屏页面")) }
         }
         try checkLocked()
-        guard let mediaSize else { throw TailingError.protocolFailure("仪表启动了视频但未协商画面尺寸") }
+        guard let media else { throw TailingError.protocolFailure("仪表启动了视频但未协商画面尺寸") }
         if isZeeho {
             UserDefaults.standard.set(targetIP, forKey: TailingDiscovery.savedAddressKey)
             log("极核仪表连接地址 \(targetIP)，PXC 握手及媒体协商通过")
         }
         log("\(profile.name) 媒体协商完成，等待仪表逐帧请求")
-        return mediaSize
+        return media.size
     }
 
     @discardableResult
     func sendJPEG(_ jpeg: Data) throws -> (pullWait: TimeInterval, writeTime: TimeInterval) {
-        let (socket, pullWait) = try readFrameRequest()
-        let packet = try TailingProtocol.jpeg(jpeg)
+        let pullWait = try readFrameRequest()
         let writeStarted = ProcessInfo.processInfo.systemUptime
-        do {
-            try socket.write(packet)
-        } catch {
-            throw terminalError(or: TailingError.channel(CWL("发送 JPEG"), error))
-        }
+        try sendFrame(jpeg, format: .jpeg)
         return (pullWait, ProcessInfo.processInfo.systemUptime - writeStarted)
     }
 
-    func waitForH264Request() throws {
+    @discardableResult
+    func waitForFrameRequest() throws -> (size: InstrumentFrameSize, format: TailingVideoFormat) {
         _ = try readFrameRequest()
+        condition.lock()
+        defer { condition.unlock() }
+        try checkLocked()
+        guard let media else { throw TailingError.protocolFailure("仪表启动了视频但未协商画面尺寸") }
+        return media
     }
 
     // 视频请求与发送由同一个会话任务顺序执行。
-    func sendH264(_ accessUnit: Data) throws {
+    func sendFrame(_ frame: Data, format: TailingVideoFormat) throws {
         let socket = try videoSocket()
-        let packet = try TailingProtocol.h264(accessUnit, includePrefix: !sentH264Prefix)
+        // Carbit reads one little-endian frame length per pull, including the first pull.
+        let packet: Data
+        switch format {
+        case .jpeg: packet = try TailingProtocol.jpeg(frame)
+        case .h264: packet = try TailingProtocol.h264(frame, includePrefix: isZeeho && lastSentFormat == nil)
+        }
         do {
             try socket.write(packet)
-            sentH264Prefix = true
         } catch {
-            throw terminalError(or: TailingError.channel(CWL("发送 H.264"), error))
+            throw terminalError(or: TailingError.channel(format == .jpeg ? CWL("发送 JPEG") : CWL("发送 H.264"), error))
         }
+        if profile == .carbit && lastSentFormat != format {
+            if format == .h264 {
+                let units = (try? AnnexB.units(in: frame)) ?? []
+                let types = units.compactMap { VideoCodec.h264.nalType($0) }.map { String($0) }
+                log(CWL("亿连视频首包 · {1} 字节 · NAL {2}", [String(frame.count), types.joined(separator: ",")]))
+            } else {
+                log(CWL("亿连视频首包 · {1} 字节 · JPEG", [String(frame.count)]))
+            }
+        }
+        lastSentFormat = format
     }
 
     private func videoSocket() throws -> TailingSocket {
@@ -165,7 +176,7 @@ final class TailingConnection: @unchecked Sendable {
         return video
     }
 
-    private func readFrameRequest() throws -> (TailingSocket, TimeInterval) {
+    private func readFrameRequest() throws -> TimeInterval {
         let socket = try videoSocket()
         let pullStarted = ProcessInfo.processInfo.systemUptime
         let request: TailingProtocol.Auxiliary
@@ -179,7 +190,7 @@ final class TailingConnection: @unchecked Sendable {
             throw TailingError.protocolFailure(String(format: CWL("视频通道收到 0x%04x（%d 字节），预期空载荷 0x72"),
                                                      Int(request.command), request.payload.count))
         }
-        return (socket, pullWait)
+        return pullWait
     }
 
     func checkHealth() throws {
@@ -439,18 +450,27 @@ final class TailingConnection: @unchecked Sendable {
                       let echoed = Data(base64Encoded: request.payload.dropFirst(32), options: .ignoreUnknownCharacters),
                       echoed == signature else { throw TailingError.protocolFailure(CWL("媒体身份回显不匹配")) }
                 try identity.verify(echoed, huid: huid)
+                let preferred = request.payload.uint32LE(8), supported = request.payload.uint32LE(12)
+                let format: TailingVideoFormat = profile == .carbit
+                    ? .carbit(preferred: preferred, supported: supported) : (profile.usesH264 ? .h264 : .jpeg)
                 condition.lock()
-                if profile != .carbit, mediaStarted, mediaSize != size {
+                if profile != .carbit, mediaStarted, media?.size != size {
                     condition.unlock()
                     throw TailingError.protocolFailure("仪表已改为 \(size)，请重新连接以切换编码尺寸")
                 }
-                mediaSize = size
+                media = (size, format)
                 condition.unlock()
-                payload = TailingProtocol.mediaConfiguration(size: size, h264: profile.usesH264)
+                payload = TailingProtocol.mediaConfiguration(size: size, h264: format == .h264)
                 response = 0x11
-                log("媒体身份回显校验通过，仪表报告 \(reported)，回应 \(profile.usesH264 ? "H.264" : "JPEG") / \(size)")
+                log("媒体身份回显校验通过，仪表报告 \(reported)，回应 \(format.name) / \(size)")
+                if profile == .carbit {
+                    let fps = request.payload.uint32LE(4)
+                    log(CWL("亿连车机请求 · {1} FPS · wantEncoder={2} · supportCodec={3}", [
+                        String(fps), String(preferred), String(format: "0x%08X", supported)
+                    ]))
+                }
             case 0x70:
-                condition.lock(); let ready = mediaSize != nil; condition.unlock()
+                condition.lock(); let ready = media != nil; condition.unlock()
                 guard ready else { throw TailingError.protocolFailure(CWL("仪表在配置完成前请求媒体启动")) }
                 try socket.write(TailingProtocol.auxiliary(0x71, token: request.token))
                 condition.lock(); mediaStarted = true; condition.broadcast(); condition.unlock()

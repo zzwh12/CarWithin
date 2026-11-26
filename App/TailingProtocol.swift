@@ -1,6 +1,20 @@
 // Adapted from xmz28/ninebot_pro: NinebotPro/Networking/TailingProtocol.swift
 import Foundation
 
+enum TailingVideoFormat: UInt32 {
+    case jpeg = 1, h264 = 2
+
+    var name: String { self == .jpeg ? "JPEG" : "H.264" }
+
+    static func carbit(preferred: UInt32, supported: UInt32) -> Self {
+        switch supported & 3 {
+        case Self.jpeg.rawValue: return .jpeg
+        case Self.h264.rawValue: return .h264
+        default: return Self(rawValue: preferred) ?? .h264
+        }
+    }
+}
+
 /// 台铃 PXC 控制、ReqBase 配套通道和逐帧 JPEG；与九号 RTP 分开。
 enum TailingProtocol {
     struct Control: Equatable {

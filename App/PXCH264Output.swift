@@ -9,16 +9,14 @@ final class PXCH264Output {
 
     deinit { stop() }
 
-    func start(localAddress: String, targetAddress: String, profile: TailingDisplayProfile,
+    func start(connection: TailingConnection,
                frameRate: ZeehoFrameRate = .fps25,
                videoMode: ZeehoVideoMode = .transcode, sourceSize: InstrumentFrameSize? = nil,
-               phone: TailingPhoneInfo, onState: @escaping (String) -> Void,
-               onLog: @escaping (String) -> Void, requestKeyframe: @escaping () -> Void) {
+               onState: @escaping (String) -> Void, requestKeyframe: @escaping () -> Void) {
         stop()
-        let next = Session(queue: queue, localAddress: localAddress, targetAddress: targetAddress,
-                           profile: profile, frameRate: frameRate, videoMode: videoMode,
-                           sourceSize: sourceSize ?? profile.preferredSize, phone: phone,
-                           onState: onState, onLog: onLog, requestKeyframe: requestKeyframe)
+        let next = Session(queue: queue, connection: connection, frameRate: frameRate, videoMode: videoMode,
+                           sourceSize: sourceSize ?? connection.profile.preferredSize,
+                           onState: onState, requestKeyframe: requestKeyframe)
         session = next
         next.start()
     }
@@ -72,6 +70,7 @@ final class PXCH264Output {
         private var latest: CVPixelBuffer?
         private lazy var compositor = CIContext(options: [.useSoftwareRenderer: profile.isZeeho, .cacheIntermediates: false])
         private var fresh = false
+        private var cachedJPEG: (size: InstrumentFrameSize, data: Data)?
         private let origin = ProcessInfo.processInfo.systemUptime
         private var lastFrame = -Double.infinity
         private var lastKeyframe = -Double.infinity
@@ -82,20 +81,17 @@ final class PXCH264Output {
         private var sentPicture = false
         private var status = ""
 
-        init(queue: DispatchQueue, localAddress: String, targetAddress: String, profile: TailingDisplayProfile,
-             frameRate: ZeehoFrameRate,
-             videoMode: ZeehoVideoMode, sourceSize: InstrumentFrameSize,
-             phone: TailingPhoneInfo, onState: @escaping (String) -> Void, onLog: @escaping (String) -> Void,
+        init(queue: DispatchQueue, connection: TailingConnection, frameRate: ZeehoFrameRate,
+             videoMode: ZeehoVideoMode, sourceSize: InstrumentFrameSize, onState: @escaping (String) -> Void,
              requestKeyframe: @escaping () -> Void) {
             self.queue = queue
-            self.profile = profile
+            self.profile = connection.profile
             self.frameRate = frameRate
             self.sourceSize = sourceSize
-            self.usesRelay = profile == .zeehoSEPlus && videoMode.effective(for: frameRate) == .relay
-            self.connection = TailingConnection(localIP: localAddress, targetIP: targetAddress,
-                profile: profile, phone: phone, log: onLog)
+            self.usesRelay = connection.profile == .zeehoSEPlus && videoMode.effective(for: frameRate) == .relay
+            self.connection = connection
             self.onState = onState
-            self.onLog = onLog
+            self.onLog = connection.log
             self.requestKeyframe = requestKeyframe
         }
 
@@ -124,10 +120,16 @@ final class PXCH264Output {
                             if !ready { Thread.sleep(forTimeInterval: 0.05); continue }
                             let remaining = nextFrame - ProcessInfo.processInfo.systemUptime
                             if remaining > 0 { Thread.sleep(forTimeInterval: min(remaining, 0.04)); continue }
-                            try connection.waitForH264Request()
-                            let size = connection.negotiatedSize ?? initialSize
+                            let (size, format) = try connection.waitForFrameRequest()
                             nextFrame = ProcessInfo.processInfo.systemUptime + 1.0 / Double(frameRate.rawValue)
                             guard active else { break }
+                            if format == .jpeg {
+                                let frame = try queue.sync { try jpeg(size: size) }
+                                try connection.sendFrame(frame, format: .jpeg)
+                                first = true
+                                reportFrameSent(size: size, format: .jpeg)
+                                continue
+                            }
                             let result = queue.sync { () -> H264EncodedFrame? in
                                 guard active, let image = latest else { return nil }
                                 return encode(image, size: size, at: ProcessInfo.processInfo.systemUptime, forceKeyframe: first)
@@ -143,12 +145,12 @@ final class PXCH264Output {
                                     }
                                 }
                                 guard let recovered else { throw TailingError.timeout(CWL("等待 H.264 编码画面")) }
-                                try connection.sendH264(recovered.data)
+                                try connection.sendFrame(recovered.data, format: .h264)
                                 first = false
                                 reportFrameSent(size: size)
                                 continue
                             }
-                            try connection.sendH264(result.data)
+                            try connection.sendFrame(result.data, format: .h264)
                             first = false
                             reportFrameSent(size: size)
                         }
@@ -276,9 +278,9 @@ final class PXCH264Output {
                 }
                 guard active else { break }
                 let pullStarted = ProcessInfo.processInfo.systemUptime
-                try connection.waitForH264Request()
+                try connection.waitForFrameRequest()
                 let writeStarted = ProcessInfo.processInfo.systemUptime
-                try connection.sendH264(frame)
+                try connection.sendFrame(frame, format: .h264)
                 let now = ProcessInfo.processInfo.systemUptime
                 relayPullTime += writeStarted - pullStarted
                 relayWriteTime += now - writeStarted
@@ -396,13 +398,24 @@ final class PXCH264Output {
             return buffer
         }
 
-        private func reportFrameSent(size: InstrumentFrameSize) {
+        private func jpeg(size: InstrumentFrameSize) throws -> Data {
+            if !fresh, let cachedJPEG, cachedJPEG.size == size { return cachedJPEG.data }
+            guard let latest else { throw TailingError.timeout(CWL("等待 CarPlay 画面")) }
+            let buffer = try fittedImage(latest, to: size)
+            let data = try TailingJPEGEncoder.representation(of: CIImage(cvPixelBuffer: buffer),
+                context: compositor, colorSpace: CGColorSpaceCreateDeviceRGB())
+            cachedJPEG = (size, data)
+            fresh = false
+            return data
+        }
+
+        private func reportFrameSent(size: InstrumentFrameSize, format: TailingVideoFormat = .h264) {
             let now = ProcessInfo.processInfo.systemUptime
             if !sentPicture {
                 sentPicture = true
                 if isRelaying {
                     onLog("极核首帧已发送 · \(size) · H.264 直传 · 源目标 \(frameRate.rawValue) FPS · 码率由 CarPlay 决定")
-                } else {
+                } else if format == .h264 {
                     let bitrate = String(format: "%.1f", Double(bitrate(for: size)) / 1_000_000)
                     onLog("\(profile.name)首帧已发送 · \(size) · 兼容转码 · 目标 \(frameRate.rawValue) FPS · 码率 \(bitrate) Mbit/s")
                 }
@@ -433,7 +446,7 @@ final class PXCH264Output {
                 relayPullTime = 0; relayWriteTime = 0
             }
             if profile == .carbit {
-                report(CWL("正在发送 · {1} · H.264", [size.description]))
+                report(CWL("正在发送 · {1} · {2}", [size.description, format.name]))
                 return
             }
             report("正在投屏 · \(size) · H.264 · 目标 \(frameRate.rawValue) FPS")
@@ -469,6 +482,7 @@ final class PXCH264Output {
             encoder?.invalidate()
             encoder = nil
             latest = nil
+            cachedJPEG = nil
             relayCondition.lock(); relayBuffer.reset(); relayCondition.broadcast(); relayCondition.unlock()
         }
     }

@@ -89,7 +89,7 @@ Fixed display sizes support common landscape and portrait aspect ratios.
 
 1. Open the QR connection screen in the head unit's CarbitLink app. On iPhone, select **Settings → Current Output → CarbitLink Direct (Experimental)** in CarWithin. Open **Output Settings → Scan Head Unit QR Code** and tap the QR code in the camera view.
 2. Join a Wi-Fi network that allows the iPhone and head unit to reach each other and select or save the matching Wi-Fi preset in CarWithin. Scanning fills in the head unit IP when the code contains a private IPv4 address. If it contains only a network name, download link or pairing token, use **Find Head Units on Wi-Fi** to select an advertised head unit or enter its known IP.
-3. Start local CarPlay. Once the head unit accepts the iOS PXC session and requests video, the connection card shows the resolution being sent. Video uses H.264 at up to 1920×1080 and 30 fps. Use the iPhone for touch and route audio through the iPhone or car Bluetooth.
+3. Start local CarPlay. Once the head unit accepts the iOS PXC session and requests video, the connection card shows the agreed resolution and format (H.264 or JPEG). Video supports up to 1920×1080 at 30 fps. Use the iPhone for touch and route audio through the iPhone or car Bluetooth.
 
 CarWithin connects with its own application identity and sends the local CarPlay picture. QR codes are processed on the iPhone. This mode requires local network projection support. Firmware that requires cloud pairing is unsupported. The factory Ford Mondeo head unit still needs an in-car test. [Carbit connectivity overview](https://carbit.com.cn/new/connect)
 
