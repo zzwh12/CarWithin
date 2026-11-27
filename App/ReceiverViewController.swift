@@ -96,7 +96,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     private let sizeModeControl = ChoiceMenu(items: [CWL("跟随车机"), CWL("固定尺寸"), CWL("自定义尺寸")])
     private let carbitSizeModeControl = ChoiceMenu(items: [CWL("固定尺寸"), CWL("自定义尺寸")])
     /// CarbitLink output cadence; 60 FPS is opt-in because the head unit must keep up.
-    private let carbitFrameRateControl = ChoiceMenu(items: [CWL("30 FPS"), CWL("60 FPS（实验）")])
+    private let carbitFrameRateControl = ChoiceMenu(items: [CWL("30 FPS"), CWL("60 FPS")])
     private var selectedCarbitFrameRate: ZeehoFrameRate {
         carbitFrameRateControl.selectedSegmentIndex == 1 ? .fps60 : .fps30
     }
@@ -2625,7 +2625,7 @@ extension ReceiverViewController {
                 rows.append(.control(CWL("帧率"), icon: ("speedometer", .systemOrange), carbitFrameRateControl))
                 rows.append(.control(CWL("CarPlay 图标大小"), icon: ("square.grid.2x2.fill", .systemPurple), iconSizeControl))
                 return [
-                    SettingsSection(CWL("亿连画面"), footer: CWL("按车机请求的尺寸等比缩放 CarPlay 画面，宽高比不同时保留黑边。60 FPS 为实验项，实际发送帧率取决于车机拉帧速度。"), [
+                    SettingsSection(CWL("亿连画面"), footer: CWL("按车机请求的尺寸等比缩放 CarPlay 画面，宽高比不同时保留黑边。实际发送帧率取决于车机拉帧速度。"), [
                         .info(CWL("车机视频"), CWL("H.264 / JPEG · 最高 1920×1080 · 30/60 FPS"))
                     ]),
                     SettingsSection(CWL("本机 CarPlay"), rows)
