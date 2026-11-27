@@ -56,7 +56,8 @@ func verifyCarbitPreviewSample() throws {
     let bytes = CVPixelBufferGetBaseAddress(image)!.assumingMemoryBound(to: UInt8.self)
     let rowStride = CVPixelBufferGetBytesPerRow(image)
     func channel(_ x: Int, _ y: Int, _ c: Int) -> UInt8 { bytes[y * rowStride + x * 4 + c] }
-    try require(channel(80, 40, 2) == 255 && channel(80, 180, 1) == 255 && channel(560, 180, 0) == 255,
+    // Full-size frame: left top red, left bottom green (checks vertical direction), right blue.
+    try require(channel(80, 40, 2) == 255 && channel(80, 500, 1) == 255 && channel(1500, 300, 0) == 255,
                 "预览帧必须保留 BGRA 色彩和上下方向")
     print("PASS: Carbit preview hands the decoded 1904×672 frame to the display layer unchanged")
 }
