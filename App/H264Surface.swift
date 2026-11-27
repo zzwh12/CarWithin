@@ -5,15 +5,22 @@ private final class SampleBufferView: UIView {
     override class var layerClass: AnyClass { AVSampleBufferDisplayLayer.self }
 }
 
-/// One touch surface for inline and fullscreen video. Only the current renderer is attached.
+/// One touch surface for inline and fullscreen video.
+/// H.264 streams arrive as compressed access units; CarbitLink instead publishes the frames
+/// it already decoded for re-encoding. Both paths use the same display layer, so Picture in
+/// Picture needs neither a second decode nor a separate source layer.
 final class H264Surface: UIView {
     private let sampleView = SampleBufferView()
-    private let bitmapView = UIImageView()
-    var usesBitmapPreview: Bool { bitmapView.superview === self }
+    var usesPreviewFrames: Bool { previewMode }
     private var display: AVSampleBufferDisplayLayer { sampleView.layer as! AVSampleBufferDisplayLayer }
     var pictureInPictureLayer: AVSampleBufferDisplayLayer { display }
     var isReadyForPictureInPicture: Bool {
-        guard format != nil, !awaitingKeyframe, !rendererNeedsRecovery, window != nil, !isHidden, !bounds.isEmpty else { return false }
+        guard window != nil, !isHidden, !bounds.isEmpty else { return false }
+        if previewMode {
+            guard let at = previewFrameAt, ProcessInfo.processInfo.systemUptime - at < 2 else { return false }
+            return display.status != .failed
+        }
+        guard format != nil, !awaitingKeyframe, !rendererNeedsRecovery else { return false }
         if #available(iOS 17.4, *) { return display.isReadyForDisplay }
         return hasEnqueuedFrame
     }
@@ -33,6 +40,9 @@ final class H264Surface: UIView {
     private var hasEnqueuedFrame = false
     private var awaitingKeyframe = false
     private var suspended = false
+    private var previewMode = false
+    private var previewFrameSize: CMVideoDimensions?
+    private var previewFrameAt: TimeInterval?
     private var lastRecovery = -Double.infinity
     private var checkingDisplaySince: TimeInterval?
     private var rendererNeedsRecovery: Bool { display.requiresFlushToResumeDecoding || display.status == .failed }
@@ -49,8 +59,6 @@ final class H264Surface: UIView {
         sampleView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         sampleView.frame = bounds
         addSubview(sampleView)
-        bitmapView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        bitmapView.contentMode = .scaleAspectFit
         display.videoGravity = .resizeAspect
         isUserInteractionEnabled = true
         isMultipleTouchEnabled = true
@@ -93,20 +101,28 @@ final class H264Surface: UIView {
 
     required init?(coder: NSCoder) { fatalError(CWL("不支持从 Storyboard 创建 H264Surface")) }
 
-    func useBitmapPreview(_ enabled: Bool) {
-        let renderer: UIView = enabled ? bitmapView : sampleView
-        guard renderer.superview !== self else { return }
+    /// CarbitLink decodes CarPlay once for re-encoding. Its preview reuses those frames at a
+    /// low rate, and Picture in Picture takes the same layer that shows them inline.
+    func usePreviewFrames(_ enabled: Bool) {
+        guard previewMode != enabled else { return }
+        previewMode = enabled
         releaseAllTouches()
-        bitmapView.image = nil
-        let previous: UIView = enabled ? sampleView : bitmapView
-        previous.removeFromSuperview()
-        renderer.frame = bounds
-        insertSubview(renderer, at: 0)
+        display.stopRequestingMediaData(); requesting = false
+        pending.removeAll(); pendingBytes = 0
+        display.flushAndRemoveImage()
+        format = nil; parameters = nil; hasEnqueuedFrame = false
+        previewFrameSize = nil; previewFrameAt = nil
+        checkingDisplaySince = nil
     }
 
-    func showBitmap(_ image: CGImage) {
-        guard bitmapView.superview === self else { return }
-        bitmapView.image = UIImage(cgImage: image)
+    /// Shows one already-decoded frame from the CarbitLink preview publisher.
+    func showPreviewFrame(_ sample: CMSampleBuffer) {
+        guard previewMode, !suspended, let buffer = CMSampleBufferGetImageBuffer(sample) else { return }
+        if display.status == .failed { display.flush() }
+        display.enqueue(sample)
+        previewFrameSize = CMVideoDimensions(width: Int32(CVPixelBufferGetWidth(buffer)),
+                                             height: Int32(CVPixelBufferGetHeight(buffer)))
+        previewFrameAt = ProcessInfo.processInfo.systemUptime
     }
 
     @objc private func holdTouchOwnership(_ gesture: UILongPressGestureRecognizer) {
@@ -130,8 +146,8 @@ final class H264Surface: UIView {
     }
 
     func reset() {
-        bitmapView.image = nil
         suspended = false
+        previewFrameAt = nil; previewFrameSize = nil
         checkingDisplaySince = nil; lastRecovery = -.infinity
         releaseAllTouches()
         display.stopRequestingMediaData(); requesting = false
@@ -163,7 +179,7 @@ final class H264Surface: UIView {
 
     func enqueue(accessUnit: Data, codec: VideoCodec) throws {
         dispatchPrecondition(condition: .onQueue(.main))
-        guard !suspended else { return }
+        guard !suspended, !previewMode else { return }
         let units = try AnnexB.units(in: accessUnit)
         if parameters?.codec != codec { parameters = VideoParameterSets(codec: codec); format = nil }
         var picture: [Data] = []
@@ -262,8 +278,8 @@ final class H264Surface: UIView {
 
     private func normalized(_ touch: UITouch) -> CGPoint? {
         let size: CGSize
-        if let bitmap = bitmapView.image {
-            size = bitmap.size
+        if let previewFrameSize {
+            size = CGSize(width: Int(previewFrameSize.width), height: Int(previewFrameSize.height))
         } else if let format {
             let dimensions = CMVideoFormatDescriptionGetDimensions(format)
             size = CGSize(width: Int(dimensions.width), height: Int(dimensions.height))

@@ -34,7 +34,7 @@ private final class Box<Value>: @unchecked Sendable {
 struct TailingTests {
     static func main() throws {
         #if TAILING_MEDIA_SMOKE
-        try verifyCarbitBitmapPreview()
+        try verifyCarbitPreviewSample()
         try verifyCarbitCroppedSPS()
         try tailingJPEGSizeSmoke()
         try tailingMediaSmoke()

@@ -23,7 +23,7 @@ private func require(_ value: Bool, _ message: String) throws {
     if !value { throw MediaSmokeError(message: message) }
 }
 
-func verifyCarbitBitmapPreview() throws {
+func verifyCarbitPreviewSample() throws {
     var pixelBuffer: CVPixelBuffer?
     let status = CVPixelBufferCreate(nil, 1904, 672, kCVPixelFormatType_32BGRA,
                                      [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &pixelBuffer)
@@ -41,18 +41,24 @@ func verifyCarbitBitmapPreview() throws {
         }
     }
     CVPixelBufferUnlockBaseAddress(buffer, [])
-    guard let bitmap = PXCH264Output.previewBitmap(buffer), let data = bitmap.dataProvider?.data,
-          let pixels = CFDataGetBytePtr(data) else { throw MediaSmokeError(message: "未生成位图预览") }
-    CVPixelBufferLockBaseAddress(buffer, [])
-    memset(CVPixelBufferGetBaseAddress(buffer)!, 0, stride * 672)
-    CVPixelBufferUnlockBaseAddress(buffer, [])
-    try require(bitmap.width == 640 && bitmap.height == 226 && bitmap.bitsPerPixel == 32, "位图预览尺寸或格式不符")
-    func channel(_ x: Int, _ y: Int, _ c: Int) -> UInt8 { pixels[y * bitmap.bytesPerRow + x * 4 + c] }
-    try withExtendedLifetime(data) {
-        try require(channel(80, 40, 2) == 255 && channel(80, 180, 1) == 255 && channel(560, 180, 0) == 255,
-                    "预览必须自己持有像素并保留 BGRA 色彩及上下方向")
-    }
-    print("PASS: Carbit preview uses an independent, correctly oriented 640×226 CPU bitmap")
+    guard let sample = PXCH264Output.previewSample(buffer),
+          let image = CMSampleBufferGetImageBuffer(sample) else { throw MediaSmokeError(message: "未生成预览帧") }
+    try require(CMSampleBufferIsValid(sample) && CMSampleBufferGetNumSamples(sample) == 1, "预览帧样本无效")
+    try require(CVPixelBufferGetWidth(image) == 1904 && CVPixelBufferGetHeight(image) == 672,
+                "预览帧应保持 CarPlay 解码尺寸，交给显示层缩放")
+    try require(CMTimeCompare(CMSampleBufferGetPresentationTimeStamp(sample), .zero) != 0,
+                "预览帧需要实时时间戳")
+    let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [NSDictionary]
+    try require(attachments?.first?[kCMSampleAttachmentKey_DisplayImmediately] as? Bool == true,
+                "预览帧需要立即显示")
+    CVPixelBufferLockBaseAddress(image, .readOnly)
+    defer { CVPixelBufferUnlockBaseAddress(image, .readOnly) }
+    let bytes = CVPixelBufferGetBaseAddress(image)!.assumingMemoryBound(to: UInt8.self)
+    let rowStride = CVPixelBufferGetBytesPerRow(image)
+    func channel(_ x: Int, _ y: Int, _ c: Int) -> UInt8 { bytes[y * rowStride + x * 4 + c] }
+    try require(channel(80, 40, 2) == 255 && channel(80, 180, 1) == 255 && channel(560, 180, 0) == 255,
+                "预览帧必须保留 BGRA 色彩和上下方向")
+    print("PASS: Carbit preview hands the decoded 1904×672 frame to the display layer unchanged")
 }
 
 func makeH264TestBars(_ size: InstrumentFrameSize) throws -> Data {

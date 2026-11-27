@@ -18382,19 +18382,19 @@
         }
       }
     },
-    "在车机打开亿连，iPhone 加入同一局域网并保存 Wi-Fi 预设。支持触控回传的车机可点按和拖动 CarPlay 画面。iPhone 提供低帧率预览，声音走 iPhone 或蓝牙。": {
+    "在车机打开亿连，iPhone 加入同一局域网并保存 Wi-Fi 预设。支持触控回传的车机可点按和拖动 CarPlay 画面。iPhone 提供可触控的低帧率预览，也可开启画中画；声音走 iPhone 或蓝牙。": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open CarbitLink on the head unit, join the same local network on iPhone, and save the Wi-Fi preset. Head units with touch return support can tap and drag the CarPlay picture. The iPhone shows a reduced-frame-rate preview. Audio plays through the iPhone or Bluetooth."
+            "value": "Open CarbitLink on the head unit, join the same local network on iPhone, and save the Wi-Fi preset. Head units with touch return support can tap and drag the CarPlay picture. The iPhone shows a touch-enabled reduced-frame-rate preview that also feeds Picture in Picture. Audio plays through the iPhone or Bluetooth."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在车机打开亿连，iPhone 加入同一局域网并保存 Wi-Fi 预设。支持触控回传的车机可点按和拖动 CarPlay 画面。iPhone 提供低帧率预览，声音走 iPhone 或蓝牙。"
+            "value": "在车机打开亿连，iPhone 加入同一局域网并保存 Wi-Fi 预设。支持触控回传的车机可点按和拖动 CarPlay 画面。iPhone 提供可触控的低帧率预览，也可开启画中画；声音走 iPhone 或蓝牙。"
           }
         }
       }
@@ -18977,19 +18977,19 @@
         }
       }
     },
-    "亿连本机预览已使用位图": {
+    "亿连本机预览已送入显示层": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Carbit local bitmap preview is active"
+            "value": "Carbit preview is rendered on the local display layer"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "亿连本机预览已使用位图"
+            "value": "亿连本机预览已送入显示层"
           }
         }
       }

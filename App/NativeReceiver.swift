@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import CoreGraphics
+import CoreMedia
 
 /// All listener/session state is confined to queue. UI callbacks are always main-thread.
 final class NativeReceiver {
@@ -61,7 +62,7 @@ final class NativeReceiver {
     private let zeeho62 = Zeeho62Legacy.ZeehoOutput()
     var onZeehoState: ((String) -> Void)?
     var onCarbitState: ((String) -> Void)?
-    var onCarbitPreview: ((CGImage) -> Void)?
+    var onCarbitPreview: ((CMSampleBuffer) -> Void)?
     private let ninebot = NinebotOutput()
     var onNinebotState: ((String) -> Void)?
     private let cfmoto5 = CfmotoOutput(name: "cfmoto5")

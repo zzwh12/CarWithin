@@ -1,7 +1,8 @@
 import CoreImage
+import CoreMedia
+import CoreVideo
 import Foundation
 import VideoToolbox
-import Accelerate
 
 /// Keeps encoding and the instrument's TCP frame requests off the CarPlay receive queue.
 final class PXCH264Output {
@@ -13,7 +14,7 @@ final class PXCH264Output {
     func start(connection: TailingConnection,
                frameRate: ZeehoFrameRate = .fps25,
                videoMode: ZeehoVideoMode = .transcode, sourceSize: InstrumentFrameSize? = nil,
-               onPreview: ((CGImage) -> Void)? = nil,
+               onPreview: ((CMSampleBuffer) -> Void)? = nil,
                onState: @escaping (String) -> Void, requestKeyframe: @escaping () -> Void) {
         stop()
         let next = Session(queue: queue, connection: connection, frameRate: frameRate, videoMode: videoMode,
@@ -36,25 +37,22 @@ final class PXCH264Output {
         session?.setPreviewEnabled(enabled)
     }
 
-    /// Copy the decoder's BGRA pixels into ordinary bitmap memory. UIKit never receives
-    /// an IOSurface or a compressed sample for the Carbit preview.
-    static func previewBitmap(_ buffer: CVPixelBuffer) -> CGImage? {
-        let width = CVPixelBufferGetWidth(buffer), height = CVPixelBufferGetHeight(buffer)
-        guard width > 0, height > 0, CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_32BGRA,
-              CVPixelBufferLockBaseAddress(buffer, .readOnly) == kCVReturnSuccess else { return nil }
-        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
-        let scale = min(1, 640 / Double(max(width, height)))
-        let w = max(1, Int((Double(width) * scale).rounded())), h = max(1, Int((Double(height) * scale).rounded()))
-        guard let src = CVPixelBufferGetBaseAddress(buffer),
-              let bitmap = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
-                    space: CGColorSpaceCreateDeviceRGB(),
-                    bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue),
-              let dst = bitmap.data else { return nil }
-        var input = vImage_Buffer(data: src, height: vImagePixelCount(height), width: vImagePixelCount(width),
-                                  rowBytes: CVPixelBufferGetBytesPerRow(buffer))
-        var output = vImage_Buffer(data: dst, height: vImagePixelCount(h), width: vImagePixelCount(w), rowBytes: bitmap.bytesPerRow)
-        guard vImageScale_ARGB8888(&input, &output, nil, vImage_Flags(kvImageNoFlags)) == kvImageNoError else { return nil }
-        return bitmap.makeImage()
+    /// Wraps a decoded CarPlay frame for the local sample-buffer display. The frame is already
+    /// decoded for re-encoding, so the preview and its Picture in Picture source add no decode.
+    static func previewSample(_ buffer: CVPixelBuffer) -> CMSampleBuffer? {
+        var description: CMVideoFormatDescription?
+        guard CMVideoFormatDescriptionCreateForImageBuffer(allocator: kCFAllocatorDefault,
+              imageBuffer: buffer, formatDescriptionOut: &description) == noErr, let description else { return nil }
+        var timing = CMSampleTimingInfo(duration: .invalid,
+            presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()), decodeTimeStamp: .invalid)
+        var sample: CMSampleBuffer?
+        guard CMSampleBufferCreateReadyWithImageBuffer(allocator: kCFAllocatorDefault, imageBuffer: buffer,
+              formatDescription: description, sampleTiming: &timing,
+              sampleBufferOut: &sample) == noErr, let sample else { return nil }
+        if let attachments = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: true) as? [NSMutableDictionary] {
+            attachments.first?[kCMSampleAttachmentKey_DisplayImmediately] = true
+        }
+        return sample
     }
 
     func stop() {
@@ -68,7 +66,7 @@ final class PXCH264Output {
         let queue: DispatchQueue
         let onState: (String) -> Void
         let onLog: (String) -> Void
-        let onPreview: ((CGImage) -> Void)?
+        let onPreview: ((CMSampleBuffer) -> Void)?
         let requestKeyframe: () -> Void
         private let lock = NSLock()
         private var cancelled = false
@@ -123,7 +121,7 @@ final class PXCH264Output {
         private var status = ""
 
         init(queue: DispatchQueue, connection: TailingConnection, frameRate: ZeehoFrameRate,
-             videoMode: ZeehoVideoMode, sourceSize: InstrumentFrameSize, onPreview: ((CGImage) -> Void)?,
+             videoMode: ZeehoVideoMode, sourceSize: InstrumentFrameSize, onPreview: ((CMSampleBuffer) -> Void)?,
              onState: @escaping (String) -> Void,
              requestKeyframe: @escaping () -> Void) {
             self.queue = queue
@@ -464,14 +462,14 @@ final class PXCH264Output {
                 return true
             }) else { return }
             lastPreview = now
-            let image = PXCH264Output.previewBitmap(buffer)
+            let sample = PXCH264Output.previewSample(buffer)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 let deliver = self.lock.withLock {
                     self.previewPending = false
                     return !self.cancelled && self.acceptingFrames && self.previewEnabled
                 }
-                if deliver, let image { onPreview(image) }
+                if deliver, let sample { onPreview(sample) }
             }
         }
 
