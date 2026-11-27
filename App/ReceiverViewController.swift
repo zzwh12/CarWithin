@@ -355,23 +355,12 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     private var displayedVideo = false
     private var identity: AccessoryIdentity?
     private var running = false
-    private var checkingForUpdates = false
-    private var updateCheckTask: Task<Void, Never>?
-    private var updateTimer: Timer?
-    private weak var updateSheet: UIViewController?
-    private var updateSheetAutomatic = false
-    private static let projectURL = URL(string: "https://github.com/xmz28/CarWithin")!
-    private static let releasesURL = projectURL.appendingPathComponent("releases")
-    private static let authorURL = URL(string: "https://v.douyin.com/x64M2NbYj0A/")!
     private var lines: [String] = []
     private var launchedTransportTest = false
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         if !running { modeChanged() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.checkForUpdates(manual: false)
-        }
         #if DEBUG
         if !launchedTransportTest, ProcessInfo.processInfo.arguments.contains("--test-same-device-transport") {
             launchedTransportTest = true
@@ -390,13 +379,12 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
                 "vehicle": vehiclePage, "sound": soundPage, "output": headUnitPage,
                 "tailing": { [unowned self] in self.headUnitOutput.selectedSegmentIndex = HeadUnitOutput.tailing.menuIndex; self.refreshVideoOutputSummary(); return self.headUnitPage() },
                 "web": headUnitPage, "log": logPage, "lab": diagnosticsPage, "about": aboutPage,
-                "usage": usagePage, "updates": aboutPage, "https": httpsSettingsPage,
+                "usage": usagePage, "https": httpsSettingsPage,
                 "thanks": { ContributionsViewController() }, "support": { DeveloperSupportViewController(openAlipayOnEntry: false) }, "support-auto": { DeveloperSupportViewController() },
                 "support-info": { SupportInformationViewController() }]
             if arguments.indices.contains(index + 1), let make = pages[arguments[index + 1]] {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
                     self?.settingsNavigation?.pushViewController(make(), animated: false)
-                    if arguments[index + 1] == "updates" { self?.checkForUpdates() }
                 }
             } else if arguments.indices.contains(index + 1), arguments[index + 1] == "history" {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
@@ -854,9 +842,6 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         NotificationCenter.default.addObserver(self, selector: #selector(backgrounded), name: UIApplication.didEnterBackgroundNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(airPlayAudioRouteChanged),
             name: AVAudioSession.routeChangeNotification, object: nil)
-        updateTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            self?.checkForUpdates(manual: false)
-        }
     }
     deinit {
         wifiPathMonitor.cancel()
@@ -1619,7 +1604,6 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         }
         if !restartingAutomatically { networkRestartCount = 0 }
         clearStartupHint()
-        updateCheckTask?.cancel()
         view.endEditing(true)
         refreshNetworkAddresses()
         let channel = UInt8(channelField.text ?? "") ?? 36
@@ -1955,9 +1939,6 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     }
     @objc private func becameActive() {
         refreshNetworkAddresses()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-            self?.checkForUpdates(manual: false)
-        }
         pictureInPicture.returnedToForeground()
         receiver.setLocalVideoEnabled(true)
         if running { UIApplication.shared.isIdleTimerDisabled = true }
@@ -2093,7 +2074,6 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         DispatchQueue.main.async { [weak self] in self?.applyAppearance() }
     }
     @objc private func backgrounded() {
-        updateCheckTask?.cancel()
         receiverBrowser.stop()
         guard running else { return }
         // willResignActive may have failed to start it (e.g. the session was busy); try once more
@@ -2357,11 +2337,8 @@ extension ReceiverViewController {
     private func aboutLinks() -> [SettingsRow] {
         [
             .externalLink(CWL("GitHub 项目"), icon: ("chevron.left.forwardslash.chevron.right", .systemIndigo)) {
-                UIApplication.shared.open(Self.projectURL)
+                UIApplication.shared.open(AppRelease.repository)
             },
-            .action(CWL("检查更新"), icon: ("arrow.clockwise.circle.fill", .systemBlue), detail: { [unowned self] in
-                self.checkingForUpdates ? CWL("检查中…") : nil
-            }) { [unowned self] in self.checkForUpdates() },
             .action(CWL("版本记录"), icon: ("clock.arrow.circlepath", .systemPurple)) { [unowned self] in
                 self.showVersionHistory()
             },
@@ -2410,83 +2387,15 @@ extension ReceiverViewController {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     }
 
-    private var canAutomaticallyCheckUpdates: Bool {
-        UIApplication.shared.applicationState == .active && !running
-            && viewIfLoaded?.window != nil && presentedViewController == nil
-    }
-
-    private func checkForUpdates(manual: Bool = true) {
-        guard UIApplication.shared.applicationState == .active, !checkingForUpdates else { return }
-        if !manual {
-            guard canAutomaticallyCheckUpdates, AppUpdatePolicy().shouldCheck() else { return }
-        }
-        checkingForUpdates = true
-        reloadVisibleSettings()
-        updateCheckTask = Task { [weak self] in
-            guard let self else { return }
-            defer {
-                self.checkingForUpdates = false
-                self.updateCheckTask = nil
-                self.reloadVisibleSettings()
-            }
-            do {
-                let release = try await AppReleaseService().latest()
-                try Task.checkCancellation()
-                guard UIApplication.shared.applicationState == .active else { return }
-                if manual {
-                    guard self.settingsNavigation?.viewIfLoaded?.window != nil else { return }
-                    AppUpdatePolicy().succeeded()
-                    self.showVersionDetails(release, automatic: false)
-                } else {
-                    guard self.canAutomaticallyCheckUpdates else { return }
-                    AppUpdatePolicy().succeeded()
-                    if AppUpdatePolicy().shouldOffer(release, installedBuild: Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0") ?? 0) {
-                        self.showVersionDetails(release, automatic: true)
-                    }
-                }
-            } catch {
-                guard !Task.isCancelled else { return }
-                AppUpdatePolicy().failed()
-                if manual, self.settingsNavigation?.viewIfLoaded?.window != nil {
-                    self.alert(CWL("检查更新失败"), error.localizedDescription)
-                }
-            }
-        }
-    }
-
     private func showVersionHistory() {
+        let presenter = settingsNavigation ?? self
+        guard presenter.presentedViewController == nil else { return }
         let history = ReleaseHistoryView(installed: installedAppVersion, canDownload: { [weak self] in
             self?.running == false && UIApplication.shared.applicationState == .active
         })
-        let controller = UIHostingController(rootView: NavigationStack {
-            history.toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(CWL("完成")) { [weak self] in self?.updateSheet?.dismiss(animated: true) }
-                }
-            }
-        })
-        presentReleaseController(controller, automatic: false)
-    }
-
-    private func showVersionDetails(_ release: AppRelease, automatic: Bool) {
-        let details = ReleaseDetailView(
-            release: release, installed: installedAppVersion, latestTag: release.tag_name,
-            canDownload: { [weak self] in
-                self?.running == false && UIApplication.shared.applicationState == .active
-            }, automatic: automatic, close: { [weak self] in
-                self?.updateSheet?.dismiss(animated: true)
-            })
-        presentReleaseController(UIHostingController(rootView: NavigationStack { details }), automatic: automatic)
-    }
-
-    private func presentReleaseController(_ controller: UIViewController, automatic: Bool) {
-        let presenter = settingsNavigation ?? self
-        guard presenter.presentedViewController == nil else { return }
+        let controller = UIHostingController(rootView: NavigationStack { history })
         controller.modalPresentationStyle = .pageSheet
         controller.sheetPresentationController?.detents = [.large()]
-        updateSheet = controller
-        updateSheetAutomatic = automatic
-        controller.presentationController?.delegate = self
         presenter.present(controller, animated: true)
     }
 
@@ -2536,16 +2445,7 @@ extension ReceiverViewController {
                     .control(CWL("画中画开启时机"), icon: ("pip.fill", .systemIndigo), pictureInPictureTiming)
                 ]),
                 SettingsSection(CWL("支持"), [
-                    .externalLink(CWL("关注作者"), icon: ("heart.fill", .systemRed), detail: CWL("抖音")) {
-                        UIApplication.shared.open(Self.authorURL)
-                    },
-                    .page(CWL("请我喝杯咖啡"), icon: ("cup.and.saucer.fill", .systemOrange)) {
-                        DeveloperSupportViewController()
-                    },
                     .page(CWL("诊断与实验"), icon: ("stethoscope", .systemTeal)) { [unowned self] in self.diagnosticsPage() },
-                    .externalLink(CWL("反馈与建议"), icon: ("bubble.left.and.bubble.right.fill", .systemBlue)) {
-                        UIApplication.shared.open(URL(string: "https://v.wjx.cn/vm/e5IX6eZ.aspx")!)
-                    },
                     .page(CWL("关于"), icon: ("info.circle.fill", .systemGray)) { [unowned self] in self.aboutPage() }
                 ])
             ]
@@ -3559,12 +3459,7 @@ extension ReceiverViewController: UIDocumentPickerDelegate {
 
 extension ReceiverViewController: UIAdaptivePresentationControllerDelegate {
     func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-        if presentationController.presentedViewController === updateSheet {
-            if updateSheetAutomatic { AppUpdatePolicy().snooze() }
-            updateSheetAutomatic = false
-        } else {
-            settingsDismissed()
-        }
+        settingsDismissed()
     }
 }
 

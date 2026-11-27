@@ -3514,23 +3514,6 @@
         }
       }
     },
-    "下次再说": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Not Now"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "下次再说"
-          }
-        }
-      }
-    },
     "下载 Android 证书，按接收页指引在系统设置中安装为 CA 证书，再打开 HTTPS 地址。系统菜单名称随品牌而异。": {
       "extractionState": "manual",
       "localizations": {
@@ -5188,23 +5171,6 @@
         }
       }
     },
-    "关注作者": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Follow the Developer"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "关注作者"
-          }
-        }
-      }
-    },
     "关键帧已到达（{1} ms，{2} 次请求）": {
       "extractionState": "manual",
       "localizations": {
@@ -5898,23 +5864,6 @@
         }
       }
     },
-    "发布构建 {1}": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Release Build {1}"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "发布构建 {1}"
-          }
-        }
-      }
-    },
     "发现 {1} 个 CarPlay 控制服务": {
       "extractionState": "manual",
       "localizations": {
@@ -5945,23 +5894,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "发现接收端 {1}，地址 {2}:{3}"
-          }
-        }
-      }
-    },
-    "发现新版本": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Update Available"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "发现新版本"
           }
         }
       }
@@ -8075,23 +8007,6 @@
         }
       }
     },
-    "完整发布说明": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Full Release Notes"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "完整发布说明"
-          }
-        }
-      }
-    },
     "定期刷新": {
       "extractionState": "manual",
       "localizations": {
@@ -8701,23 +8616,6 @@
         }
       }
     },
-    "已是最新发布版本": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "You’re Using the Latest Release"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "已是最新发布版本"
-          }
-        }
-      }
-    },
     "已生成": {
       "extractionState": "manual",
       "localizations": {
@@ -9134,23 +9032,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "开放网络（无密码）"
-          }
-        }
-      }
-    },
-    "当前公开版本尚未提供 ios-update.json，请在 GitHub 查看发布记录。": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "The current public release does not include ios-update.json. View the release history on GitHub."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "当前公开版本尚未提供 ios-update.json，请在 GitHub 查看发布记录。"
           }
         }
       }
@@ -9647,23 +9528,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "投送到 iPad"
-          }
-        }
-      }
-    },
-    "抖音": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Douyin"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "抖音"
           }
         }
       }
@@ -11243,23 +11107,6 @@
         }
       }
     },
-    "最新发布": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Latest Release"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "最新发布"
-          }
-        }
-      }
-    },
     "最近 200 条，不含 Wi-Fi 密码和 MFi 私钥。": {
       "extractionState": "manual",
       "localizations": {
@@ -12158,57 +12005,6 @@
         }
       }
     },
-    "检查中…": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Checking…"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "检查中…"
-          }
-        }
-      }
-    },
-    "检查更新": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Check for Updates"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "检查更新"
-          }
-        }
-      }
-    },
-    "检查更新失败": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Update Check Failed"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "检查更新失败"
-          }
-        }
-      }
-    },
     "检查这台 iPhone 是否允许 App 发布本机 iAP2 配件端点（本机 CarPlay 的前提）。CarPlay 运行中不能测试。": {
       "extractionState": "manual",
       "localizations": {
@@ -12787,23 +12583,6 @@
         }
       }
     },
-    "此版本不再提醒": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Skip This Version"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "此版本不再提醒"
-          }
-        }
-      }
-    },
     "此版本暂无 IPA 附件。": {
       "extractionState": "manual",
       "localizations": {
@@ -12834,23 +12613,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "此版本暂无更新说明。"
-          }
-        }
-      }
-    },
-    "此版本需要 iOS {1} 或更高版本。": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "This version requires iOS {1} or later."
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "此版本需要 iOS {1} 或更高版本。"
           }
         }
       }
@@ -13240,23 +13002,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "版本信息无效，请查看 GitHub 发布记录。"
-          }
-        }
-      }
-    },
-    "版本更新": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "App Update"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "版本更新"
           }
         }
       }
@@ -18056,22 +17801,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "春风 6.2 寸"
-          }
-        }
-      }
-    },
-    "反馈与建议": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Feedback & Suggestions"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "反馈与建议"
           }
         }
       }

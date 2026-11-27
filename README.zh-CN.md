@@ -2,7 +2,7 @@
 
 [English](README.en.md) · **简体中文**
 
-[![Platform: iOS 16.0+](https://img.shields.io/badge/iOS-16.0%2B-blue)](#下载与安装) [![Status: released](https://img.shields.io/badge/status-released-brightgreen)](#快速开始) [![Release](https://img.shields.io/github/v/release/xmz28/CarWithin?label=release)](https://github.com/xmz28/CarWithin/releases/latest)
+[![Platform: iOS 16.0+](https://img.shields.io/badge/iOS-16.0%2B-blue)](#下载与安装) [![Build iOS IPA](https://github.com/zzwh12/CarWithin/actions/workflows/build-ios.yml/badge.svg)](https://github.com/zzwh12/CarWithin/actions/workflows/build-ios.yml)
 
 CarWithin 在同一台 iPhone 上启动、显示和触控本机 CarPlay。你可以直接在 iPhone 上用导航、音乐等 CarPlay 应用，也可以把画面送到同一局域网的车机浏览器、平板、电脑或另一台手机。浏览器接收支持触控回传。
 
@@ -10,8 +10,8 @@ CarWithin 在同一台 iPhone 上启动、显示和触控本机 CarPlay。你可
 
 ## 下载与安装
 
-- [从 GitHub Releases 下载](https://github.com/xmz28/CarWithin/releases/latest)。当前版本为 **1.0.5（构建 17）**。
-- 下载 `CarWithin-1.0.5-unsigned.ipa`，用支持 IPA 的侧载工具按自己的签名方式签名并安装。按设备提示完成开发者信任或开启开发者模式。
+- 打开本分支一次成功的 iOS 构建，下载 `CarWithin-iOS-unsigned` 构件。[Build iOS IPA](https://github.com/zzwh12/CarWithin/actions/workflows/build-ios.yml)
+- 解压得到 `CarWithin-unsigned.ipa`，用支持 IPA 的侧载工具按自己的签名方式签名并安装。按设备提示完成开发者信任或开启开发者模式。
 - 最低安装目标为 iOS/iPadOS 16.0，arm64；iOS 15 不支持安装。安装目标降低不等于所有旧系统均已实测，iOS 16.x 的本机 CarPlay、声音和后台行为仍需对应设备验证。实际可用性取决于设备、系统版本和签名方式。CarWithin 使用 iOS 私有接口，系统升级后可能需要重新验证。
 
 ## 1.0.5 更新
@@ -20,7 +20,6 @@ CarWithin 在同一台 iPhone 上启动、显示和触控本机 CarPlay。你可
 - 新增可选的蚂蚁 ANT BMS 实时读取与电池卡片，默认关闭。
 - App 和浏览器接收页支持中英文；部分新增适配提示仍使用中文。
 - 改进 Wi-Fi 密码保存、CarLife 发现及 AirPlay 连接恢复，完善赞赏支持和贡献者名单。
-- 设置增加「反馈与建议」，位于「诊断与实验」下、「关于」上。
 
 维护者已验证已有功能的兼容性。新增极核、春风及 ANT BMS 尚缺少维护者对应硬件实测，不把编译或模拟协议测试当作所有型号均已兼容。
 
@@ -148,18 +147,15 @@ iPhone 加入仪表 Wi-Fi，在「当前输出」选择对应春风尺寸，开�
 
 ## 反馈、赞赏与贡献者
 
-「设置 → 反馈与建议」打开[问卷星反馈问卷](https://v.wjx.cn/vm/e5IX6eZ.aspx)。诊断日志可从「诊断与实验 → 日志 → 复制日志」取得；提交前自行检查和遮挡无关个人信息。
+设置中的「支持」包含「诊断与实验」和「关于」。诊断日志可从「诊断与实验 → 日志 → 复制日志」取得；提交前自行检查和遮挡无关个人信息。
 
-「关于 → 赞赏与支持」可查看赞赏和开发测试贡献名单，「请我喝杯咖啡」提供支付宝、微信入口。赞赏完全自愿，不影响使用、更新或适配安排。
+「关于 → 赞赏与支持」可查看赞赏和开发测试贡献名单。赞赏完全自愿，不影响使用、更新或适配安排。
 
 本轮代码贡献鸣谢：[yiquchangge1](https://github.com/yiquchangge1)（SE+）、[武汉 / yuliang-shuji](https://github.com/yuliang-shuji)（AE2 Pro）、[Boos4721](https://github.com/Boos4721)（ANT BMS）、[扫毒单位 / SDDW007](https://github.com/SDDW007)（春风）。GitHub 作者信息和原始提交均保留。
 
-## 检查更新与安装新版
+## 版本记录
 
-- 在「关于 → 检查更新」查看最新版说明；当前已是最新版时也可以查看详情和下载。完整发布说明可展开查看，「版本记录」可查看历史发布。
-- App 会在前台空闲时自动检查，成功后间隔 24 小时；失败后 15 分钟再试。发现新版本可选择下载、下次再说或此版本不再提醒。CarPlay 运行期间会延后自动检查，并限制安装包下载。
-- 下载完成并校验后弹出系统分享菜单，可交给兼容的签名工具打开，也可以保存到自己选择的文件夹。签名和安装仍需在相应工具中完成，App 不会自行安装 IPA。
-- 从 1.0.0 升级时，旧版检查更新会先打开 GitHub 发布页，需要自行下载并签名安装；安装新版后才有上述 App 内下载与分享流程。
+打开「设置 → 关于 → 版本记录」可查看本分支已发布的版本。版本附有 IPA 时，可在停止 CarPlay 后下载，并分享给签名工具或保存到「文件」。
 
 ## 常见问题
 
@@ -167,7 +163,7 @@ iPhone 加入仪表 Wi-Fi，在「当前输出」选择对应春风尺寸，开�
 - **网页打不开。** 确认 CarPlay 已启动、局域网接收页已打开、两台设备能互访，并用 App 显示的 HTTP 地址先试。能开 HTTP、HTTPS 提示证书问题时，按上面的步骤在接收设备上配置证书。
 - **连接成功但不出画面。** 试用 H.264、较低的分辨率或帧率，也可换浏览器。Redmi K30 5G 的 X 浏览器已实测能播放 HTTP 和 HTTPS。同机的 Chrome 109 曾遇到 H.265 解码失败。若切换网页后出现硬解码器资源不足，重启浏览器再试。
 - **网页有画面但没声音。** 检查是否已选「随画面传输（Wi-Fi）」并重新启动 CarPlay。若网页显示「开启声音」，点一下，再检查接收设备的音量。
-- **如何查版本或反馈问题。** 在「设置 → 关于」查看版本、检查更新或查看发布记录。反馈问题时请附 iPhone 和接收设备型号、系统、浏览器版本、HTTP/HTTPS、编码和分辨率，以及「设置 → 诊断与实验 → 日志」中相关片段。 [提交问题](https://github.com/xmz28/CarWithin/issues)
+- **如何查版本或反馈问题。** 在「设置 → 关于」查看已安装版本和发布记录。反馈问题时请附 iPhone 和接收设备型号、系统、浏览器版本、HTTP/HTTPS、编码和分辨率，以及「设置 → 诊断与实验 → 日志」中相关片段。 [提交问题](https://github.com/xmz28/CarWithin/issues)
 
 ## 工作原理与许可
 

@@ -1,4 +1,6 @@
-# CarWithin iOS 更新协议
+# CarWithin iOS 旧版更新协议
+
+当前独立分支已移除应用内更新检查。「关于 → 版本记录」在打开时读取 `zzwh12/CarWithin` 的发布列表。下文记录原项目旧版客户端使用的清单格式与发布流程。
 
 本协议于开发版 1.0.1（12）接入，已随正式版 1.0.1（13）发布，并提供配套 ios-update.json。日常开发保持应用版本号和构建号不变。准备正式发布时，未指定版本则末位版本号与构建号各加 1；用户指定版本号时按要求设置，构建号仍保持全局递增。先更新本地 `App/Info.plist`，再从同一份源码打包并生成清单。同一轮发布重打包或重试上传不重复递增；已公开的版本不覆盖、不回退。详细规则见 [AGENTS.md](AGENTS.md)。
 
@@ -39,24 +41,17 @@ python3 Tools/make_ios_update.py /absolute/path/CarWithin-1.0.1-unsigned.ipa \
 
 用户确认历史详情继续显示 Release Markdown，不接入逐条 JSON 详情读取。此方案作为后续跨项目版本记录文案的默认值；Ninebot Pro iOS 当前先显示 JSON notes、展开显示完整 Markdown，保留现状，不因规范更新立即迁移。减少的是文案展示的额外网络请求，更新发现与安装包校验仍按各项目协议执行。当前版本检查页面仍按现有实现优先显示 JSON notes，历史页面显示正文，两者不混同。本轮未修改应用代码。CarWithin 与 Ninebot Pro iOS 的检查和 App 内版本记录均排除草稿、预发布；GitHub 网页仍可访问它们。
 
-## 本地回归检查
-
-```sh
-xcrun swiftc -parse-as-library App/AppReleaseService.swift Tools/UpdateSmoke.swift -o /tmp/carwithin-update-smoke
-/tmp/carwithin-update-smoke
-```
-
-覆盖 JSON 发现、产品和附件一致性、仅构建号排序、按构建忽略、检查间隔、缺失清单，以及浏览历史不读取统计清单。使用模拟响应，不修改线上发布。
-
 ## 英文更新说明（2026-11-24）
 
 清单新增可选字符串 `notesEn`，`schemaVersion` 继续为 1。`notes` 仍为非空中文说明，旧客户端忽略新增字段。新版 App 根据当前 App 语言选择说明：英文优先使用非空 `notesEn`，缺失或空白回退 `notes`；中文始终使用 `notes`。不改变构建号比较与附件校验。
 
 生成时可追加 `--notes-en /absolute/path/update-notes.en.md`；未指定时不输出该字段。GitHub Release 正文保持中文。历史页面及展开的完整发布说明仍直接显示原始 Release Markdown，不额外下载各版本 JSON。
 
-本地更新回归命令需同时编译语言支持文件：
+## 独立分支的版本记录回归检查
+
+在 macOS 上运行以下命令。测试使用模拟响应，核对发布列表过滤、IPA 附件来源，以及实际请求是否只包含手动打开的列表页。
 
 ```sh
-xcrun swiftc -parse-as-library Sources/TDSCarKitCore/Localization.swift App/AppReleaseService.swift Tools/UpdateSmoke.swift -o /tmp/carwithin-update-smoke
-/tmp/carwithin-update-smoke
+xcrun swiftc -parse-as-library Sources/TDSCarKitCore/Localization.swift App/AppReleaseService.swift Tools/UpdateSmoke.swift -o /tmp/carwithin-release-history-smoke
+/tmp/carwithin-release-history-smoke
 ```

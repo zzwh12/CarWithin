@@ -2,7 +2,7 @@
 
 **English** · [简体中文](README.md)
 
-[![Platform: iOS 16.0+](https://img.shields.io/badge/iOS-16.0%2B-blue)](#download-and-install) [![Status: released](https://img.shields.io/badge/status-released-brightgreen)](#quick-start) [![Release](https://img.shields.io/github/v/release/xmz28/CarWithin?label=release)](https://github.com/xmz28/CarWithin/releases/latest)
+[![Platform: iOS 16.0+](https://img.shields.io/badge/iOS-16.0%2B-blue)](#download-and-install) [![Build iOS IPA](https://github.com/zzwh12/CarWithin/actions/workflows/build-ios.yml/badge.svg)](https://github.com/zzwh12/CarWithin/actions/workflows/build-ios.yml)
 
 CarWithin runs CarPlay on the same iPhone that generates its interface. Use CarPlay directly on your iPhone for navigation and music, or send the display to a head unit, tablet, computer, or another phone on the local network. A receiving browser can send touch input back to CarPlay.
 
@@ -10,8 +10,8 @@ CarWithin runs CarPlay on the same iPhone that generates its interface. Use CarP
 
 ## Download and install
 
-- [Download from GitHub Releases](https://github.com/xmz28/CarWithin/releases/latest). The current version is **1.0.5 (build 17)**.
-- Download `CarWithin-1.0.5-unsigned.ipa` and sign and install it with an IPA sideloading tool using your own signing setup. Follow any iOS prompts for developer trust or Developer Mode.
+- Open a successful build for this branch and download the `CarWithin-iOS-unsigned` artifact. [Build iOS IPA](https://github.com/zzwh12/CarWithin/actions/workflows/build-ios.yml)
+- Extract `CarWithin-unsigned.ipa` from the artifact and sign and install it with an IPA sideloading tool using your own signing setup. Follow any iOS prompts for developer trust or Developer Mode.
 - The minimum installation target is iOS/iPadOS 16.0 on arm64; iOS 15 is not supported. Same-device CarPlay, audio, and background behavior still need testing on iOS 16.x hardware. CarWithin uses private iOS interfaces. Compatibility depends on the device, OS version, and signing setup, and OS updates can affect it.
 
 ## What is new in 1.0.5
@@ -20,7 +20,6 @@ CarWithin runs CarPlay on the same iPhone that generates its interface. Use CarP
 - Added optional ANT BMS telemetry and battery cards, disabled by default.
 - Added English app and browser-receiver interfaces; some new dashboard messages still fall back to Chinese.
 - Improved saved Wi-Fi passwords, CarLife discovery and AirPlay recovery, and added supporter and contributor views.
-- Added Feedback & Suggestions between Diagnostics and experiments and About.
 
 The maintainer checked existing functionality for regressions. The new ZEEHO, CFMOTO and ANT BMS paths still need corresponding hardware testing by the maintainer; builds and simulated protocol tests do not establish compatibility with every model.
 
@@ -148,18 +147,15 @@ Cards currently appear in the phone CarPlay preview and Ninebot 5/7-inch video. 
 
 ## Feedback, support and contributors
 
-Settings → Feedback & Suggestions opens the [feedback survey](https://v.wjx.cn/vm/e5IX6eZ.aspx). Copy diagnostic logs from Diagnostics and experiments → Logs → Copy logs, and check for unrelated personal information before submitting them.
+The Support section in Settings contains Diagnostics and experiments and About. Copy diagnostic logs from Diagnostics and experiments → Logs → Copy logs, and check for unrelated personal information before submitting them.
 
-About → Appreciation & Support lists supporters and development/testing contributions; Buy me a coffee provides Alipay and WeChat options. Support is optional and does not affect features, updates or adaptation priorities.
+About → Appreciation & Support lists supporters and development/testing contributions. Support is optional and does not affect features, updates or adaptation priorities.
 
 Code contributions in this release: [yiquchangge1](https://github.com/yiquchangge1) (SE+), [武汉 / yuliang-shuji](https://github.com/yuliang-shuji) (AE2 Pro), [Boos4721](https://github.com/Boos4721) (ANT BMS), and [扫毒单位 / SDDW007](https://github.com/SDDW007) (CFMOTO). Original commits and GitHub authorship are preserved.
 
-## Check for updates and install a newer version
+## Release history
 
-- About → Check for updates shows the latest release, including when your installed version is already current. Expand the full release notes or use Version history for older releases.
-- Automatic checks run while the app is idle in the foreground, with a 24-hour interval after success and a 15-minute retry after failure. A new-version prompt offers Download, Later, and Ignore this version. Checks are deferred and package downloads restricted during a CarPlay session.
-- After downloading and verifying the IPA, CarWithin opens the system share sheet. Open it in a compatible signing tool or save it to a folder you choose. Signing and installation are completed in that tool; CarWithin does not install the IPA itself.
-- When upgrading from 1.0.0, its older updater opens the GitHub release page. Download, sign, and install this version there; in-app downloading and sharing become available after upgrading.
+Open **Settings → About → Version history** to browse releases published by this fork. After stopping CarPlay, you can download an attached IPA, then share it with your signing tool or save it to Files.
 
 ## Troubleshooting
 
@@ -167,7 +163,7 @@ Code contributions in this release: [yiquchangge1](https://github.com/yiquchangg
 - **The page will not open.** Check that CarPlay is running and the local receiver page is enabled. Confirm that the devices can reach each other and try the HTTP address first. If HTTPS shows a certificate error, follow the setup steps on the receiving device.
 - **The page connects but shows no picture.** Try a different browser, H.264, a lower resolution, or a lower frame rate. X Browser played HTTP and HTTPS on a Redmi K30 5G in testing. Chrome 109 on the same device showed an H.265 decoding error. If switching pages exhausts the hardware decoder, restart the browser and try again.
 - **The picture plays without sound.** Select Wi-Fi audio in the app, restart CarPlay, and use the browser's enable-audio button if it appears. Check the volume on the receiving device.
-- **Check your version or report a problem.** Open **Settings → About** for the installed version, update check, and release history. For a bug report, include the device models, OS and browser versions, HTTP or HTTPS, codec and resolution, and any relevant lines from the app's diagnostic log. [Report an issue](https://github.com/xmz28/CarWithin/issues)
+- **Check your version or report a problem.** Open **Settings → About** for the installed version and release history. For a bug report, include the device models, OS and browser versions, HTTP or HTTPS, codec and resolution, and any relevant lines from the app's diagnostic log. [Report an issue](https://github.com/xmz28/CarWithin/issues)
 
 ## How it works and license
 

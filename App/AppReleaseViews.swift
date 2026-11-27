@@ -115,8 +115,8 @@ final class ReleaseDownload: NSObject, ObservableObject, URLSessionDownloadDeleg
 struct ReleaseHistoryView: View {
     let installed: String
     let canDownload: () -> Bool
+    @Environment(\.dismiss) private var dismiss
     @State private var releases: [AppRelease] = []
-    @State private var latestTag: String?
     @State private var page = 1
     @State private var hasNext = true
     @State private var loading = false
@@ -126,8 +126,7 @@ struct ReleaseHistoryView: View {
         List {
             ForEach(releases) { release in
                 NavigationLink {
-                    ReleaseDetailView(release: release, installed: installed, latestTag: latestTag,
-                                      canDownload: canDownload)
+                    ReleaseDetailView(release: release, installed: installed, canDownload: canDownload)
                 } label: {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
@@ -136,9 +135,6 @@ struct ReleaseHistoryView: View {
                             Spacer()
                             if ReleaseVersion(release.version) == ReleaseVersion(installed) {
                                 Text(CWL("当前安装")).foregroundStyle(.secondary).font(.caption)
-                            }
-                            if release.tag_name == latestTag {
-                                Text(CWL("最新发布")).foregroundStyle(.blue).font(.caption)
                             }
                         }
                         if let date = release.published_at {
@@ -166,9 +162,13 @@ struct ReleaseHistoryView: View {
         }
         .navigationTitle(CWL("版本记录"))
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button(CWL("完成")) { dismiss() }
+            }
+        }
         .task {
             if releases.isEmpty { await load() }
-            if latestTag == nil { latestTag = try? await AppReleaseService().latestTag() }
         }
     }
 
@@ -195,52 +195,20 @@ struct ReleaseHistoryView: View {
 struct ReleaseDetailView: View {
     let release: AppRelease
     let installed: String
-    let latestTag: String?
     let canDownload: () -> Bool
-    var automatic = false
-    var close: (() -> Void)?
-    @Environment(\.dismiss) private var dismiss
-    @State private var expandedNotes = false
-
-    private var installedBuild: Int {
-        Int(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "0") ?? 0
-    }
-    private var supportedOS: Bool {
-        guard let minimum = release.update?.minimumOSVersion, let required = ReleaseVersion(minimum) else { return true }
-        let os = ProcessInfo.processInfo.operatingSystemVersion
-        let current = ReleaseVersion("\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)")!
-        return required <= current
-    }
-
-    private var status: String {
-        guard release.tag_name == latestTag, let update = release.update else {
-            return CWL("版本详情")
-        }
-        return update.build > installedBuild ? CWL("发现新版本") : CWL("已是最新发布版本")
-    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Label(status, systemImage: automatic ? "arrow.down.circle" : "info.circle")
-                        .font(.subheadline.weight(.medium)).foregroundStyle(.blue)
                     Text("CarWithin \(release.version)").font(.title2.bold())
-                    if let update = release.update {
-                        Text(CWL("发布构建 {1}", [String(describing: update.build)])).font(.subheadline).foregroundStyle(.secondary)
-                    }
                     Text(CWL("当前安装 {1}（{2}）", [String(describing: installed), String(describing: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-")]))
                         .font(.subheadline).foregroundStyle(.secondary)
                     if let date = release.published_at {
                         Text(date, style: .date).font(.subheadline).foregroundStyle(.secondary)
                     }
                 }
-                ReleaseNotesView(markdown: release.update?.localizedNotes() ?? release.body ?? CWL("此版本暂无更新说明。"))
-                if release.update != nil, let body = release.body, !body.isEmpty {
-                    DisclosureGroup(CWL("完整发布说明"), isExpanded: $expandedNotes) {
-                        ReleaseNotesView(markdown: body).padding(.top, 12)
-                    }
-                }
+                ReleaseNotesView(markdown: release.body ?? CWL("此版本暂无更新说明。"))
                 Link(CWL("在 GitHub 查看"), destination: release.pageURL)
                     .frame(maxWidth: .infinity)
             }
@@ -251,23 +219,10 @@ struct ReleaseDetailView: View {
         .background(Color(uiColor: .systemGroupedBackground))
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 10) {
-                if !supportedOS {
-                    Text(CWL("此版本需要 iOS {1} 或更高版本。", [String(describing: release.update?.minimumOSVersion ?? "")]))
-                        .font(.footnote).foregroundStyle(.secondary)
-                } else if let asset = release.ipa {
+                if let asset = release.ipa {
                     ReleaseDownloadView(asset: asset, canDownload: canDownload)
                 } else {
                     Text(CWL("此版本暂无 IPA 附件。")).font(.footnote).foregroundStyle(.secondary)
-                }
-                if automatic {
-                    Button(CWL("下次再说")) {
-                        AppUpdatePolicy().snooze()
-                        finish()
-                    }.buttonStyle(ReleaseActionStyle(kind: .secondary))
-                    Button(CWL("此版本不再提醒")) {
-                        AppUpdatePolicy().ignore(release)
-                        finish()
-                    }.buttonStyle(ReleaseActionStyle(kind: .outline))
                 }
             }
             .padding(.horizontal, 24)
@@ -278,22 +233,8 @@ struct ReleaseDetailView: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .overlay(alignment: .top) { Divider() }
         }
-        .navigationTitle(automatic ? CWL("版本更新") : CWL("版本详情"))
+        .navigationTitle(CWL("版本详情"))
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if close != nil {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(CWL("完成")) {
-                        if automatic { AppUpdatePolicy().snooze() }
-                        finish()
-                    }
-                }
-            }
-        }
-    }
-
-    private func finish() {
-        if let close { close() } else { dismiss() }
     }
 }
 
