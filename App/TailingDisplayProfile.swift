@@ -107,13 +107,17 @@ enum TailingDisplayProfile: Equatable, Sendable {
         }
     }
 
-    func outputSize(for reported: InstrumentFrameSize) -> InstrumentFrameSize? {
+    func outputSize(for reported: InstrumentFrameSize, format: TailingVideoFormat = .h264) -> InstrumentFrameSize? {
         switch self {
         case .carbit:
             guard (160...8192).contains(reported.width), (120...4320).contains(reported.height) else { return nil }
             let scale = min(1, 1920 / Double(reported.width), 1080 / Double(reported.height))
-            return InstrumentFrameSize(width: Int(Double(reported.width) * scale) & ~1,
-                                       height: Int(Double(reported.height) * scale) & ~1)
+            // The 7.0.1 iOS receiver compares the uncropped SPS macroblock size to our reply.
+            // Use complete macroblocks for AVC so its first-frame check sees the same dimensions.
+            let alignment = format == .h264 ? 16 : 2
+            let width = Int(Double(reported.width) * scale)
+            let height = Int(Double(reported.height) * scale)
+            return InstrumentFrameSize(width: width - width % alignment, height: height - height % alignment)
         case .tailing43:
             return reported == preferredSize ? preferredSize : nil
         case .zeeho62:

@@ -53,6 +53,41 @@ func makeH264TestBars(_ size: InstrumentFrameSize) throws -> Data {
     return try result.get().data
 }
 
+// Read the coded dimensions, before the SPS cropping rectangle. The 7.0.1 iOS receiver
+// checks these before handing the picture to MediaCodec. A normal decoder applies the crop.
+private func baselineMacroblockSize(_ sps: Data) -> InstrumentFrameSize? {
+    var rbsp: [UInt8] = []
+    var zeros = 0
+    for byte in sps {
+        if zeros == 2 && byte == 3 { zeros = 0; continue }
+        rbsp.append(byte)
+        zeros = byte == 0 ? zeros + 1 : 0
+    }
+    guard rbsp.count >= 4, rbsp[1] == 66 else { return nil }
+    var bits = BitReader(rbsp, byteOffset: 4)
+    // seq_parameter_set_id, log2_max_frame_num_minus4, pic_order_cnt_type
+    guard bits.ue() != nil, bits.ue() != nil, let order = bits.ue(), order <= 2 else { return nil }
+    if order == 0 {
+        guard bits.ue() != nil else { return nil }
+    } else if order == 1 {
+        // Signed and unsigned Exp-Golomb fields have the same length when skipping offsets.
+        guard bits.bit() != nil, bits.ue() != nil, bits.ue() != nil, let cycle = bits.ue(), cycle <= 255 else { return nil }
+        for _ in 0..<cycle where bits.ue() == nil { return nil }
+    }
+    guard bits.ue() != nil, bits.bit() != nil, let widthMinusOne = bits.ue(),
+          let heightMinusOne = bits.ue(), bits.bit() == 1 else { return nil }
+    return InstrumentFrameSize(width: (widthMinusOne + 1) * 16, height: (heightMinusOne + 1) * 16)
+}
+
+func verifyCarbitCroppedSPS() throws {
+    let previousSize = InstrumentFrameSize(width: 486, height: 1080)
+    let frame = try makeH264TestBars(previousSize)
+    let sps = try AnnexB.units(in: frame).first { VideoCodec.h264.nalType($0) == 7 }
+    try require(sps.flatMap(baselineMacroblockSize) == InstrumentFrameSize(width: 496, height: 1088),
+                "旧协商尺寸应能复现亿连首帧 SPS 的宏块尺寸差异")
+    print("PASS: Carbit 7.0.1 dimension check reproduces 486×1080 vs 496×1088 in the VideoToolbox SPS")
+}
+
 func verifyH264TestBars(_ data: Data, size: InstrumentFrameSize, greenCenter: Bool = false, contentHeight: Int? = nil) throws {
     var parameters = VideoParameterSets(codec: .h264)
     var picture: [Data] = []
@@ -62,6 +97,7 @@ func verifyH264TestBars(_ data: Data, size: InstrumentFrameSize, greenCenter: Bo
     }
     try require(parameters.isComplete && picture.contains { VideoCodec.h264.nalType($0) == 5 },
                 "亿连首帧需包含 SPS、PPS 和 IDR")
+    try require(parameters.sps.flatMap(baselineMacroblockSize) == size, "H.264 SPS 宏块宽高必须匹配车机收到的协商值")
     let image = MediaBox<CVPixelBuffer?>(nil)
     let failure = MediaBox<Error?>(nil)
     let decoder = try TailingH264Decoder(configuration: parameters.decoderConfigurationRecord(),

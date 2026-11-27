@@ -34,6 +34,7 @@ private final class Box<Value>: @unchecked Sendable {
 struct TailingTests {
     static func main() throws {
         #if TAILING_MEDIA_SMOKE
+        try verifyCarbitCroppedSPS()
         try tailingJPEGSizeSmoke()
         try tailingMediaSmoke()
         #endif
@@ -56,9 +57,9 @@ struct TailingTests {
             try simulatedInstrument(identity: stableIdentity, profile: .zeehoAE2, reported: size, expected: size)
         }
         try simulatedInstrument(identity: stableIdentity, profile: .carbit,
-                                reported: .init(width: 3840, height: 1200), expected: .init(width: 1920, height: 600))
+                                reported: .init(width: 3840, height: 1200), expected: .init(width: 1920, height: 592))
         try simulatedInstrument(identity: stableIdentity, profile: .carbit,
-                                reported: .init(width: 1440, height: 3200), expected: .init(width: 486, height: 1080))
+                                reported: .init(width: 1440, height: 3200), expected: .init(width: 480, height: 1072))
         try rejectedInstrument()
         try rejectedInstrument(profile: .carbit)
         print("PASS: Carbit QR parsing, consecutive 0x103a0/0x10020/0x10430 receipts and unknown-command tolerance on both control sockets, H.264 frames, display resize and mirroring capability checks")
@@ -357,14 +358,16 @@ struct TailingTests {
                     for format in testFormats {
                         try configure(panel, format, token: 70)
                         let reply = try TailingProtocol.readAuxiliary { try aux.readExactly($0) }
-                        try expect(reply.command == 0x11 && reply.token == 70 && reply.payload.uint32LE(0) == format.rawValue,
+                        let pictureSize = format == .jpeg ? InstrumentFrameSize(width: 1920, height: 600) : expectedSize
+                        try expect(reply.command == 0x11 && reply.token == 70 && reply.payload.uint32LE(0) == format.rawValue &&
+                                   reply.payload.uint16LE(4) == pictureSize.width && reply.payload.uint16LE(6) == pictureSize.height,
                                    "测试画面应遵循接收端协商的编码")
                         try video.write(pull)
                         let length = Int(try video.readExactly(4).uint32LE(0))
                         try expect((1...8 * 1024 * 1024).contains(length), "收到测试画面")
                         let frame = try video.readExactly(length)
-                        if format == .jpeg { try verifyJPEGTestBars(frame, size: expectedSize, greenCenter: true) }
-                        else { try verifyH264TestBars(frame, size: expectedSize, greenCenter: true) }
+                        if format == .jpeg { try verifyJPEGTestBars(frame, size: pictureSize, greenCenter: true) }
+                        else { try verifyH264TestBars(frame, size: pictureSize, greenCenter: true) }
                     }
                     showLive()
                     // Some receivers pause their pulls; the next picture must be the live source.
@@ -393,7 +396,7 @@ struct TailingTests {
                     #if TAILING_MEDIA_SMOKE
                     if profile == .carbit {
                         if format == .jpeg { try verifyJPEGTestBars(frame, size: size) }
-                        else { try verifyH264TestBars(frame, size: size, contentHeight: portraitCarbit ? 172 : nil) }
+                        else { try verifyH264TestBars(frame, size: size, contentHeight: portraitCarbit ? 169 : nil) }
                         print("PASS: Carbit pull \(index + 1), decoded \(format.name) red/blue bars at \(size)")
                         continue
                     }

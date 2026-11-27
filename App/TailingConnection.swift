@@ -446,7 +446,10 @@ final class TailingConnection: @unchecked Sendable {
                 }
                 let reported = InstrumentFrameSize(width: Int(request.payload.uint16LE(0)),
                                                    height: Int(request.payload.uint16LE(2)))
-                guard let size = profile.outputSize(for: reported) else {
+                let preferred = request.payload.uint32LE(8), supported = request.payload.uint32LE(12)
+                let format: TailingVideoFormat = profile == .carbit
+                    ? .carbit(preferred: preferred, supported: supported) : (profile.usesH264 ? .h264 : .jpeg)
+                guard let size = profile.outputSize(for: reported, format: format) else {
                     throw TailingError.protocolFailure("仪表媒体尺寸 \(reported) 与 \(profile.name) 配置不符")
                 }
                 let deadline = Date().addingTimeInterval(5)
@@ -460,9 +463,6 @@ final class TailingConnection: @unchecked Sendable {
                       let echoed = Data(base64Encoded: request.payload.dropFirst(32), options: .ignoreUnknownCharacters),
                       echoed == signature else { throw TailingError.protocolFailure(CWL("媒体身份回显不匹配")) }
                 try identity.verify(echoed, huid: huid)
-                let preferred = request.payload.uint32LE(8), supported = request.payload.uint32LE(12)
-                let format: TailingVideoFormat = profile == .carbit
-                    ? .carbit(preferred: preferred, supported: supported) : (profile.usesH264 ? .h264 : .jpeg)
                 condition.lock()
                 if profile != .carbit, mediaStarted, media?.size != size {
                     condition.unlock()
