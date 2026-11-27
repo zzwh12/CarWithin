@@ -673,8 +673,14 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         ])
         receiver.onLog = { [weak self] in self?.log($0) }; bluetooth.onLog = { [weak self] in self?.log($0) }
         receiver.onControlConnected = { [weak self] in self?.sameDevice.didConnectControl() }
+        receiver.onCarbitPreview = { [weak self] image in
+            guard let self, self.running, self.videoSurface.usesBitmapPreview,
+                  UIApplication.shared.applicationState == .active, self.presentedViewController == nil else { return }
+            self.videoSurface.showBitmap(image)
+            self.didDisplayLocalPicture()
+        }
         receiver.onVideo = { [weak self] data, codec in
-            guard let self, self.running else { return }
+            guard let self, self.running, !self.videoSurface.usesBitmapPreview else { return }
             if self.outputMode == .airPlay { self.airPlayLastVideoAt = ProcessInfo.processInfo.systemUptime }
             // Nothing local is visible in the background without PiP: save the decoding work.
             // The browser output is fed before this callback and keeps running.
@@ -684,18 +690,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
             }
             do {
                 try self.videoSurface.enqueue(accessUnit: data, codec: codec)
-                if !self.displayedVideo {
-                    self.inlineVideoContainer.isHidden = false
-                    self.displayedVideo = true; self.statusLabel.text = CWL("正在显示 CarPlay")
-                    self.clearStartupHint()
-                    self.networkStartupTask?.cancel()
-                    self.networkStartupTask = nil
-                    self.videoActions.isHidden = false; self.controlBar.isHidden = false
-                    self.pictureInPictureButton.isHidden = self.outputMode == .zeehoSEPlus
-                    self.log(CWL("视频已送入本机显示层"))
-                    if UIDevice.current.userInterfaceIdiom == .pad { self.showFullscreen() }
-                    self.updatePictureInPicturePolicy()
-                }
+                self.didDisplayLocalPicture()
                 self.pictureInPicture.sourceMayBeReady()
             } catch {
                 self.statusLabel.text = CWL("视频显示异常")
@@ -1226,7 +1221,20 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { button.setTitle(CWL("复制"), for: .normal) }
     }
     @objc private func startPictureInPicture() {
+        guard !videoSurface.usesBitmapPreview else { return }
         if !pictureInPicture.start() { statusLabel.text = CWL("暂时无法开启画中画") }
+    }
+    private func didDisplayLocalPicture() {
+        guard !displayedVideo else { return }
+        displayedVideo = true
+        inlineVideoContainer.isHidden = false; statusLabel.text = CWL("正在显示 CarPlay")
+        clearStartupHint()
+        networkStartupTask?.cancel(); networkStartupTask = nil
+        videoActions.isHidden = false; controlBar.isHidden = false
+        pictureInPictureButton.isHidden = videoSurface.usesBitmapPreview || outputMode == .zeehoSEPlus
+        log(videoSurface.usesBitmapPreview ? CWL("亿连本机预览已使用位图") : CWL("视频已送入本机显示层"))
+        if UIDevice.current.userInterfaceIdiom == .pad { showFullscreen() }
+        updatePictureInPicturePolicy()
     }
     private var displayAspectHeight: CGFloat {
         let plan = planDisplay(for: targetScreen)
@@ -1812,7 +1820,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         pictureInPicture.stop(); keepAlive.stop(); skippedLocalVideo = false
         hideFullscreen(); videoActions.isHidden = true; controlBar.isHidden = true
         displayedVideo = false; didRequestImmediatePiP = false
-        videoSurface.reset(); inlineVideoContainer.isHidden = true
+        videoSurface.reset(); videoSurface.useBitmapPreview(false); inlineVideoContainer.isHidden = true
         receiver.onListening = nil; bluetooth.stop(); sameDevice.stop(); controlBrowser.stop(); receiver.stop()
         receiverBrowser.stop()
         modeControl.isEnabled = true
@@ -1910,6 +1918,10 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         guard running else { return }
         // Normally already running; retry if foreground activation failed.
         if keepAliveSwitch.isOn { keepAlive.start() }
+        if videoSurface.usesBitmapPreview {
+            receiver.setLocalVideoEnabled(false)
+            return
+        }
         if outputMode == .zeehoSEPlus {
             receiver.setLocalVideoEnabled(false)
             skippedLocalVideo = true
@@ -1926,7 +1938,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
             self?.checkForUpdates(manual: false)
         }
         pictureInPicture.returnedToForeground()
-        receiver.setLocalVideoEnabled(true)
+        receiver.setLocalVideoEnabled(!videoSurface.usesBitmapPreview || settingsNavigation == nil)
         if running { UIApplication.shared.isIdleTimerDisabled = true }
         resumeLocalVideo()
         pictureInPicture.sourceMayBeReady()
@@ -1947,7 +1959,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     }
 
     private func updatePictureInPicturePolicy() {
-        if outputMode == .zeehoSEPlus {
+        if videoSurface.usesBitmapPreview || outputMode == .zeehoSEPlus {
             pictureInPicture.setAutomatic(false)
             return
         }
@@ -2287,19 +2299,28 @@ extension ReceiverViewController {
         }
         let root = rootSettingsPage()
         let navigation = UINavigationController(rootViewController: root)
+        let coveringBitmap = running && videoSurface.usesBitmapPreview
+        if coveringBitmap {
+            receiver.setLocalVideoEnabled(false)
+            videoSurface.releaseAllTouches()
+            navigation.modalPresentationStyle = .fullScreen
+        }
         navigation.navigationBar.prefersLargeTitles = false
         root.navigationItem.rightBarButtonItem = UIBarButtonItem(systemItem: .done, primaryAction: UIAction { [weak self] _ in
             self?.settingsNavigation?.view.endEditing(true)
-            self?.settingsNavigation?.dismiss(animated: true) { self?.settingsDismissed() }
+            self?.settingsNavigation?.dismiss(animated: !coveringBitmap) { self?.settingsDismissed() }
         })
         navigation.presentationController?.delegate = self
         if wifi { navigation.pushViewController(wifiPage(), animated: false) }
         if output { navigation.pushViewController(headUnitPage(), animated: false) }
         settingsNavigation = navigation
-        present(navigation, animated: true)
+        present(navigation, animated: !coveringBitmap)
     }
 
     fileprivate func settingsDismissed() {
+        if running, videoSurface.usesBitmapPreview {
+            receiver.setLocalVideoEnabled(UIApplication.shared.applicationState == .active)
+        }
         view.endEditing(true)
         UserDefaults.standard.set(nameField.text ?? "CarWithin", forKey: "receiverName")
         saveHeadUnitOutput()
@@ -3016,7 +3037,7 @@ extension ReceiverViewController {
             })
         }
         rows.append(.note(carbitStatus))
-        return [SettingsSection(CWL("亿连直连（实验）"), footer: CWL("在车机打开亿连，iPhone 加入与车机互通的 Wi-Fi 并保存同名预设。CarWithin 按车机请求发送 H.264 或 JPEG 画面。声音走 iPhone 或蓝牙，触控在 iPhone 上操作。"), rows)]
+        return [SettingsSection(CWL("亿连直连（实验）"), footer: CWL("在车机打开亿连，iPhone 加入同一局域网并保存 Wi-Fi 预设。支持触控回传的车机可点按和拖动 CarPlay 画面。iPhone 提供低帧率预览，声音走 iPhone 或蓝牙。"), rows)]
     }
 
     private func carbitDiscoveryPage() -> SettingsPageController {
@@ -3054,6 +3075,10 @@ extension ReceiverViewController {
     }
 
     private func prepareExternalOutput(configuration: ReceiverConfiguration) {
+        let bitmap = configuration.carbitAddress != nil
+        videoSurface.useBitmapPreview(bitmap)
+        receiver.setLocalVideoEnabled(!bitmap || (UIApplication.shared.applicationState == .active && settingsNavigation == nil))
+        if bitmap { pictureInPicture.setAutomatic(false) }
         if configuration.zeehoAddress != nil { updateZeehoStatus(CWL("正在连接极核仪表…")) }
         if configuration.cfmotoProfile != nil { updateCfmotoStatus("正在推流到春风仪表…") }
         if configuration.ninebotAddress != nil { updateNinebotStatus(CWL("正在连接九号仪表…")) }

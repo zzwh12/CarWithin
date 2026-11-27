@@ -1,5 +1,44 @@
 // Adapted from xmz28/ninebot_pro: NinebotPro/Networking/TailingConnection.swift
 import Foundation
+import CoreGraphics
+
+/// Touch coordinates from the 7.0.1 receiver start at the fitted video's top-left corner.
+/// They are in receiver pixels, including any letterbox added inside the video by CarWithin.
+struct CarbitTouchInput {
+    let content: CGRect
+    private(set) var contacts: [TouchPoint] = []
+
+    init(panel: InstrumentFrameSize, video: InstrumentFrameSize, source: InstrumentFrameSize) {
+        let viewport = panel.fittedRect(for: CGSize(width: video.width, height: video.height))
+        let scale = viewport.width / CGFloat(video.width)
+        let fitted = video.fittedRect(for: CGSize(width: source.width, height: source.height))
+        content = fitted.applying(CGAffineTransform(scaleX: scale, y: scale))
+    }
+
+    mutating func consume(_ payload: Data) -> [TouchPoint]? {
+        guard payload.count == 18 else { return nil }
+        let action = payload.uint16LE(0)
+        let id = Int(payload.uint16LE(6))
+        let held = contacts.firstIndex { $0.id == id }
+        switch action {
+        case 1: // up; keep the last position in the HID release report
+            guard let held else { return nil }
+            contacts.remove(at: held)
+        case 2, 3: // down, move
+            let x = CGFloat(Int16(bitPattern: payload.uint16LE(2)))
+            let y = CGFloat(Int16(bitPattern: payload.uint16LE(4)))
+            if held == nil {
+                guard action == 2, contacts.count < 32, content.contains(CGPoint(x: x, y: y)) else { return nil }
+            }
+            let point = TouchPoint(id: id, x: min(1, max(0, (x - content.minX) / content.width)),
+                                   y: min(1, max(0, (y - content.minY) / content.height)))
+            if let held { contacts[held] = point } else { contacts.append(point) }
+        default:
+            return nil
+        }
+        return contacts
+    }
+}
 
 struct TailingPhoneInfo {
     let package: String
@@ -44,6 +83,8 @@ final class TailingConnection: @unchecked Sendable {
     private let phone: TailingPhoneInfo
     private let ports: TailingPorts
     private let identityProvider: () throws -> TailingIdentity
+    private let sourceSize: InstrumentFrameSize?
+    private let onCarbitTouches: ((UUID, [TouchPoint]) -> Void)?
     let log: (String) -> Void
     private let condition = NSCondition()
     private var resources: [TailingSocket] = []
@@ -63,9 +104,11 @@ final class TailingConnection: @unchecked Sendable {
 
     init(localIP: String, targetIP: String, profile: TailingDisplayProfile, phone: TailingPhoneInfo,
          ports: TailingPorts = .ios, identityProvider: @escaping () throws -> TailingIdentity = TailingIdentity.load,
+         sourceSize: InstrumentFrameSize? = nil, onCarbitTouches: ((UUID, [TouchPoint]) -> Void)? = nil,
          log: @escaping (String) -> Void) {
         self.localIP = localIP; self.targetIP = targetIP; self.profile = profile; self.phone = phone
         self.ports = ports; self.identityProvider = identityProvider; self.log = log
+        self.sourceSize = sourceSize; self.onCarbitTouches = onCarbitTouches
     }
 
     @discardableResult
@@ -429,7 +472,11 @@ final class TailingConnection: @unchecked Sendable {
     }
 
     private func auxiliary(_ socket: TailingSocket) throws {
-        var dumpedScreenEvents = 0
+        let touchSource = UUID()
+        var input: CarbitTouchInput?
+        var started = false
+        var loggedTouch = false
+        defer { if let input, !input.contacts.isEmpty { onCarbitTouches?(touchSource, []) } }
         while true {
             // 此通道可能长时间空闲，停止通过 shutdown 唤醒。
             var readingHeader = true
@@ -470,6 +517,13 @@ final class TailingConnection: @unchecked Sendable {
                 }
                 media = (size, format)
                 condition.unlock()
+                if profile == .carbit, let sourceSize, onCarbitTouches != nil {
+                    let next = CarbitTouchInput(panel: reported, video: size, source: sourceSize)
+                    if input?.content != next.content {
+                        if let input, !input.contacts.isEmpty { onCarbitTouches?(touchSource, []) }
+                        input = next
+                    }
+                }
                 payload = TailingProtocol.mediaConfiguration(size: size, h264: format == .h264)
                 response = 0x11
                 log("媒体身份回显校验通过，仪表报告 \(reported)，回应 \(format.name) / \(size)")
@@ -483,6 +537,7 @@ final class TailingConnection: @unchecked Sendable {
                 condition.lock(); let ready = media != nil; condition.unlock()
                 guard ready else { throw TailingError.protocolFailure(CWL("仪表在配置完成前请求媒体启动")) }
                 try socket.write(TailingProtocol.auxiliary(0x71, token: request.token))
+                started = true
                 condition.lock(); mediaStarted = true; condition.broadcast(); condition.unlock()
                 continue
             case 0x40: response = 0x41
@@ -491,12 +546,12 @@ final class TailingConnection: @unchecked Sendable {
             case 0x60:
                 response = 0x61; payload = try TailingProtocol.json(["supportFunction": 0])
             case 0x20:
-                // 亿连 EP SDK 屏幕事件（0x20：u16 类型@0、u32 坐标域@2、u16 槽位@6、u16 按键码@8，18 字节）
-                // 格式验证期：记录原始字节，暂不执行反控。
-                dumpedScreenEvents += 1
-                if dumpedScreenEvents <= 100 {
-                    let hex = request.payload.map { String(format: "%02x", $0) }.joined(separator: " ")
-                    log("亿连屏幕事件 #\(dumpedScreenEvents)（\(request.payload.count) 字节）：\(hex)")
+                if started, let points = input?.consume(request.payload) {
+                    onCarbitTouches?(touchSource, points)
+                    if !loggedTouch {
+                        loggedTouch = true
+                        log(CWL("已收到亿连车机触控，正在转发给 CarPlay"))
+                    }
                 }
                 continue
             default:

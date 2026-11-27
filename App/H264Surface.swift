@@ -1,10 +1,16 @@
 import UIKit
 import AVFoundation
 
-/// Receives complete Annex-B access units; transport decryption/demux precedes this layer.
-final class H264Surface: UIView {
+private final class SampleBufferView: UIView {
     override class var layerClass: AnyClass { AVSampleBufferDisplayLayer.self }
-    private var display: AVSampleBufferDisplayLayer { layer as! AVSampleBufferDisplayLayer }
+}
+
+/// One touch surface for inline and fullscreen video. Only the current renderer is attached.
+final class H264Surface: UIView {
+    private let sampleView = SampleBufferView()
+    private let bitmapView = UIImageView()
+    var usesBitmapPreview: Bool { bitmapView.superview === self }
+    private var display: AVSampleBufferDisplayLayer { sampleView.layer as! AVSampleBufferDisplayLayer }
     var pictureInPictureLayer: AVSampleBufferDisplayLayer { display }
     var isReadyForPictureInPicture: Bool {
         guard format != nil, !awaitingKeyframe, !rendererNeedsRecovery, window != nil, !isHidden, !bounds.isEmpty else { return false }
@@ -39,6 +45,12 @@ final class H264Surface: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .black
+        sampleView.isUserInteractionEnabled = false
+        sampleView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        sampleView.frame = bounds
+        addSubview(sampleView)
+        bitmapView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        bitmapView.contentMode = .scaleAspectFit
         display.videoGravity = .resizeAspect
         isUserInteractionEnabled = true
         isMultipleTouchEnabled = true
@@ -81,6 +93,22 @@ final class H264Surface: UIView {
 
     required init?(coder: NSCoder) { fatalError(CWL("不支持从 Storyboard 创建 H264Surface")) }
 
+    func useBitmapPreview(_ enabled: Bool) {
+        let renderer: UIView = enabled ? bitmapView : sampleView
+        guard renderer.superview !== self else { return }
+        releaseAllTouches()
+        bitmapView.image = nil
+        let previous: UIView = enabled ? sampleView : bitmapView
+        previous.removeFromSuperview()
+        renderer.frame = bounds
+        insertSubview(renderer, at: 0)
+    }
+
+    func showBitmap(_ image: CGImage) {
+        guard bitmapView.superview === self else { return }
+        bitmapView.image = UIImage(cgImage: image)
+    }
+
     @objc private func holdTouchOwnership(_ gesture: UILongPressGestureRecognizer) {
         // The recognizer intentionally does no work. It prevents the parent scroll view
         // from cancelling a CarPlay drag while raw touch callbacks keep their HID semantics.
@@ -102,6 +130,7 @@ final class H264Surface: UIView {
     }
 
     func reset() {
+        bitmapView.image = nil
         suspended = false
         checkingDisplaySince = nil; lastRecovery = -.infinity
         releaseAllTouches()
@@ -232,9 +261,14 @@ final class H264Surface: UIView {
     private var nextFingerID = 0
 
     private func normalized(_ touch: UITouch) -> CGPoint? {
-        guard let format else { return nil }
-        let dimensions = CMVideoFormatDescriptionGetDimensions(format)
-        let rect = AVMakeRect(aspectRatio: CGSize(width: Int(dimensions.width), height: Int(dimensions.height)), insideRect: bounds)
+        let size: CGSize
+        if let bitmap = bitmapView.image {
+            size = bitmap.size
+        } else if let format {
+            let dimensions = CMVideoFormatDescriptionGetDimensions(format)
+            size = CGSize(width: Int(dimensions.width), height: Int(dimensions.height))
+        } else { return nil }
+        let rect = AVMakeRect(aspectRatio: size, insideRect: bounds)
         guard rect.width > 0, rect.height > 0 else { return nil }
         let point = touch.location(in: self)
         return CGPoint(x: min(max((point.x - rect.minX) / rect.width, 0), 1),

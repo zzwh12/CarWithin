@@ -18382,19 +18382,19 @@
         }
       }
     },
-    "在车机打开亿连，iPhone 加入与车机互通的 Wi-Fi 并保存同名预设。CarWithin 按车机请求发送 H.264 或 JPEG 画面。声音走 iPhone 或蓝牙，触控在 iPhone 上操作。": {
+    "在车机打开亿连，iPhone 加入同一局域网并保存 Wi-Fi 预设。支持触控回传的车机可点按和拖动 CarPlay 画面。iPhone 提供低帧率预览，声音走 iPhone 或蓝牙。": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Open CarbitLink on the head unit. Connect your iPhone to its Wi-Fi and save a preset with the same network name. CarWithin sends H.264 or JPEG according to the format requested by the head unit. Use the iPhone for touch and the iPhone or Bluetooth for audio."
+            "value": "Open CarbitLink on the head unit, join the same local network on iPhone, and save the Wi-Fi preset. Head units with touch return support can tap and drag the CarPlay picture. The iPhone shows a reduced-frame-rate preview. Audio plays through the iPhone or Bluetooth."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "在车机打开亿连，iPhone 加入与车机互通的 Wi-Fi 并保存同名预设。CarWithin 按车机请求发送 H.264 或 JPEG 画面。声音走 iPhone 或蓝牙，触控在 iPhone 上操作。"
+            "value": "在车机打开亿连，iPhone 加入同一局域网并保存 Wi-Fi 预设。支持触控回传的车机可点按和拖动 CarPlay 画面。iPhone 提供低帧率预览，声音走 iPhone 或蓝牙。"
           }
         }
       }
@@ -18956,6 +18956,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "{1}已发送停止投屏通知"
+          }
+        }
+      }
+    },
+    "已收到亿连车机触控，正在转发给 CarPlay": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Received head unit touch input and forwarding it to CarPlay"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已收到亿连车机触控，正在转发给 CarPlay"
+          }
+        }
+      }
+    },
+    "亿连本机预览已使用位图": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carbit local bitmap preview is active"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "亿连本机预览已使用位图"
           }
         }
       }

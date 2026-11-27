@@ -1,6 +1,7 @@
 import CoreImage
 import Foundation
 import VideoToolbox
+import Accelerate
 
 /// Keeps encoding and the instrument's TCP frame requests off the CarPlay receive queue.
 final class PXCH264Output {
@@ -12,11 +13,12 @@ final class PXCH264Output {
     func start(connection: TailingConnection,
                frameRate: ZeehoFrameRate = .fps25,
                videoMode: ZeehoVideoMode = .transcode, sourceSize: InstrumentFrameSize? = nil,
+               onPreview: ((CGImage) -> Void)? = nil,
                onState: @escaping (String) -> Void, requestKeyframe: @escaping () -> Void) {
         stop()
         let next = Session(queue: queue, connection: connection, frameRate: frameRate, videoMode: videoMode,
                            sourceSize: sourceSize ?? connection.profile.preferredSize,
-                           onState: onState, requestKeyframe: requestKeyframe)
+                           onPreview: onPreview, onState: onState, requestKeyframe: requestKeyframe)
         session = next
         next.start()
     }
@@ -30,6 +32,31 @@ final class PXCH264Output {
         session?.requestCarbitTestPicture()
     }
 
+    func setPreviewEnabled(_ enabled: Bool) {
+        session?.setPreviewEnabled(enabled)
+    }
+
+    /// Copy the decoder's BGRA pixels into ordinary bitmap memory. UIKit never receives
+    /// an IOSurface or a compressed sample for the Carbit preview.
+    static func previewBitmap(_ buffer: CVPixelBuffer) -> CGImage? {
+        let width = CVPixelBufferGetWidth(buffer), height = CVPixelBufferGetHeight(buffer)
+        guard width > 0, height > 0, CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_32BGRA,
+              CVPixelBufferLockBaseAddress(buffer, .readOnly) == kCVReturnSuccess else { return nil }
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        let scale = min(1, 640 / Double(max(width, height)))
+        let w = max(1, Int((Double(width) * scale).rounded())), h = max(1, Int((Double(height) * scale).rounded()))
+        guard let src = CVPixelBufferGetBaseAddress(buffer),
+              let bitmap = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.noneSkipFirst.rawValue),
+              let dst = bitmap.data else { return nil }
+        var input = vImage_Buffer(data: src, height: vImagePixelCount(height), width: vImagePixelCount(width),
+                                  rowBytes: CVPixelBufferGetBytesPerRow(buffer))
+        var output = vImage_Buffer(data: dst, height: vImagePixelCount(h), width: vImagePixelCount(w), rowBytes: bitmap.bytesPerRow)
+        guard vImageScale_ARGB8888(&input, &output, nil, vImage_Flags(kvImageNoFlags)) == kvImageNoError else { return nil }
+        return bitmap.makeImage()
+    }
+
     func stop() {
         guard let previous = session else { return }
         session = nil
@@ -41,10 +68,14 @@ final class PXCH264Output {
         let queue: DispatchQueue
         let onState: (String) -> Void
         let onLog: (String) -> Void
+        let onPreview: ((CGImage) -> Void)?
         let requestKeyframe: () -> Void
         private let lock = NSLock()
         private var cancelled = false
         private var testRequested = false
+        private var previewEnabled = true
+        private var previewPending = false
+        private var lastPreview = -Double.infinity
         private var acceptingFrames = true
         private var queued = 0
         private var skipping = false
@@ -92,7 +123,8 @@ final class PXCH264Output {
         private var status = ""
 
         init(queue: DispatchQueue, connection: TailingConnection, frameRate: ZeehoFrameRate,
-             videoMode: ZeehoVideoMode, sourceSize: InstrumentFrameSize, onState: @escaping (String) -> Void,
+             videoMode: ZeehoVideoMode, sourceSize: InstrumentFrameSize, onPreview: ((CGImage) -> Void)?,
+             onState: @escaping (String) -> Void,
              requestKeyframe: @escaping () -> Void) {
             self.queue = queue
             self.profile = connection.profile
@@ -101,6 +133,7 @@ final class PXCH264Output {
             self.usesRelay = connection.profile == .zeehoSEPlus && videoMode.effective(for: frameRate) == .relay
             self.connection = connection
             self.onState = onState
+            self.onPreview = connection.profile == .carbit ? onPreview : nil
             self.onLog = connection.log
             self.requestKeyframe = requestKeyframe
         }
@@ -404,7 +437,10 @@ final class PXCH264Output {
                     return (decoded, decodeError)
                 }
                 if let error { throw error }
-                if let image { latest = image; decodedPictures &+= 1 }
+                if let image {
+                    latest = image; decodedPictures &+= 1
+                    publishPreview(image)
+                }
             } catch {
                 decoder?.invalidate()
                 decoder = nil
@@ -412,6 +448,30 @@ final class PXCH264Output {
                 waitingForIDR = true
                 logCodecFailure(CWL("解码"), error)
                 requestKeyframe()
+            }
+        }
+
+        func setPreviewEnabled(_ enabled: Bool) {
+            lock.withLock { previewEnabled = enabled }
+        }
+
+        private func publishPreview(_ buffer: CVPixelBuffer) {
+            guard let onPreview else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            guard now - lastPreview >= 0.125, lock.withLock({
+                guard !cancelled, acceptingFrames, previewEnabled, !previewPending else { return false }
+                previewPending = true
+                return true
+            }) else { return }
+            lastPreview = now
+            let image = PXCH264Output.previewBitmap(buffer)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let deliver = self.lock.withLock {
+                    self.previewPending = false
+                    return !self.cancelled && self.acceptingFrames && self.previewEnabled
+                }
+                if deliver, let image { onPreview(image) }
             }
         }
 

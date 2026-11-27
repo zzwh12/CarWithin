@@ -18,6 +18,7 @@ final class NativeReceiver {
     func setLocalVideoEnabled(_ enabled: Bool) {
         queue.async { [weak self] in
             self?.localVideoEnabled = enabled
+            self?.pxcVideoOutput.setPreviewEnabled(enabled)
             if !enabled { self?.localSkipping = false }
         }
     }
@@ -60,6 +61,7 @@ final class NativeReceiver {
     private let zeeho62 = Zeeho62Legacy.ZeehoOutput()
     var onZeehoState: ((String) -> Void)?
     var onCarbitState: ((String) -> Void)?
+    var onCarbitPreview: ((CGImage) -> Void)?
     private let ninebot = NinebotOutput()
     var onNinebotState: ((String) -> Void)?
     private let cfmoto5 = CfmotoOutput(name: "cfmoto5")
@@ -126,18 +128,24 @@ final class NativeReceiver {
                         onLog: { [weak self] in self?.log($0) },
                         requestKeyframe: { [weak self] in self?.requestKeyFrame(reason: "极核 6.2 寸解码恢复") })
                 } else {
+                    let run = self.generation
+                    let sourceSize = InstrumentFrameSize(width: configuration.width, height: configuration.height)
                     let connection = TailingConnection(localIP: configuration.address,
                         targetIP: profile.isZeeho && configuration.zeehoAutomaticAddress ? "" : target,
-                        profile: profile, phone: phone, log: { [weak self] in self?.log($0) })
+                        profile: profile, phone: phone, sourceSize: sourceSize,
+                        onCarbitTouches: { [weak self] id, points in
+                            self?.touches(source: "carbit-\(id)", points, generation: run)
+                        }, log: { [weak self] in self?.log($0) })
                     self.pxcVideoOutput.start(connection: connection,
                         frameRate: profile == .carbit ? .fps30 : configuration.zeehoFrameRate,
                         videoMode: configuration.zeehoVideoMode,
-                        sourceSize: InstrumentFrameSize(width: configuration.width, height: configuration.height),
+                        sourceSize: sourceSize, onPreview: self.onCarbitPreview,
                         onState: { [weak self] message in
                             if profile == .carbit { self?.onCarbitState?(message) }
                             else { self?.onZeehoState?(message) }
                         },
                         requestKeyframe: { [weak self] in self?.requestKeyFrame(reason: CWL("{1}解码恢复", [profile.name])) })
+                    self.pxcVideoOutput.setPreviewEnabled(self.localVideoEnabled)
                 }
             }
             if let profile = configuration.cfmotoProfile,
@@ -292,9 +300,9 @@ final class NativeReceiver {
     }
     private var activeMedia: CarPlayMediaSession? { sessions.values.first(where: { $0.media != nil })?.media }
     /// All fingers currently held by `source` (normalized 0…1); an empty list releases them.
-    func touches(source: String, _ points: [TouchPoint]) {
+    func touches(source: String, _ points: [TouchPoint], generation: UUID? = nil) {
         queue.async { [weak self] in
-            guard let self, let size = self.displaySize else { return }
+            guard let self, generation == nil || generation == self.generation, let size = self.displaySize else { return }
             let report = self.touchSlots.update(source: source, points: points)
             guard !report.isEmpty else { return }
             let contacts = report.map { entry in
@@ -491,7 +499,7 @@ final class NativeReceiver {
                     if configuration.tailingAddress != nil { self.tailing.append(data, codec: codec) }
                     if configuration.carLifeEnabled { self.carLife.append(data, codec: codec) }
                     if configuration.carLinkRelayAddress != nil { self.carLink.append(data, codec: codec) }
-                    guard self.localVideoEnabled else { return }
+                    guard configuration.carbitAddress == nil, self.localVideoEnabled else { return }
                     if self.localSkipping {
                         guard keyframe, self.localInFlight < self.maximumLocalInFlight / 2 else { return }
                         self.localSkipping = false

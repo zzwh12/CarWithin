@@ -23,6 +23,38 @@ private func require(_ value: Bool, _ message: String) throws {
     if !value { throw MediaSmokeError(message: message) }
 }
 
+func verifyCarbitBitmapPreview() throws {
+    var pixelBuffer: CVPixelBuffer?
+    let status = CVPixelBufferCreate(nil, 1904, 672, kCVPixelFormatType_32BGRA,
+                                     [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &pixelBuffer)
+    guard status == kCVReturnSuccess, let buffer = pixelBuffer else { throw MediaSmokeError(message: "无法创建预览测试帧") }
+    CVPixelBufferLockBaseAddress(buffer, [])
+    let base = CVPixelBufferGetBaseAddress(buffer)!.assumingMemoryBound(to: UInt8.self)
+    let stride = CVPixelBufferGetBytesPerRow(buffer)
+    for y in 0..<672 {
+        for x in 0..<1904 {
+            let p = base + y * stride + x * 4
+            p[0] = x >= 952 ? 255 : 0
+            p[1] = x < 952 && y >= 336 ? 255 : 0
+            p[2] = x < 952 && y < 336 ? 255 : 0
+            p[3] = 255
+        }
+    }
+    CVPixelBufferUnlockBaseAddress(buffer, [])
+    guard let bitmap = PXCH264Output.previewBitmap(buffer), let data = bitmap.dataProvider?.data,
+          let pixels = CFDataGetBytePtr(data) else { throw MediaSmokeError(message: "未生成位图预览") }
+    CVPixelBufferLockBaseAddress(buffer, [])
+    memset(CVPixelBufferGetBaseAddress(buffer)!, 0, stride * 672)
+    CVPixelBufferUnlockBaseAddress(buffer, [])
+    try require(bitmap.width == 640 && bitmap.height == 226 && bitmap.bitsPerPixel == 32, "位图预览尺寸或格式不符")
+    func channel(_ x: Int, _ y: Int, _ c: Int) -> UInt8 { pixels[y * bitmap.bytesPerRow + x * 4 + c] }
+    try withExtendedLifetime(data) {
+        try require(channel(80, 40, 2) == 255 && channel(80, 180, 1) == 255 && channel(560, 180, 0) == 255,
+                    "预览必须自己持有像素并保留 BGRA 色彩及上下方向")
+    }
+    print("PASS: Carbit preview uses an independent, correctly oriented 640×226 CPU bitmap")
+}
+
 func makeH264TestBars(_ size: InstrumentFrameSize) throws -> Data {
     let encoded = MediaBox<Result<H264EncodedFrame, Error>?>(nil)
     let encoder = try H264Encoder(width: size.width, height: size.height, fps: 25, bitrate: 4_000_000) {

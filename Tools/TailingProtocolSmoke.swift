@@ -34,6 +34,7 @@ private final class Box<Value>: @unchecked Sendable {
 struct TailingTests {
     static func main() throws {
         #if TAILING_MEDIA_SMOKE
+        try verifyCarbitBitmapPreview()
         try verifyCarbitCroppedSPS()
         try tailingJPEGSizeSmoke()
         try tailingMediaSmoke()
@@ -213,6 +214,10 @@ struct TailingTests {
                                             reported: InstrumentFrameSize? = nil, expected: InstrumentFrameSize? = nil) throws {
         FileHandle.standardError.write(Data("Testing instrument profile: \(profile)\n".utf8))
         let panel = reported ?? (profile == .zeeho62 ? InstrumentFrameSize(width: 1024, height: 488) : profile.preferredSize)
+        let portraitCarbit = profile == .carbit && panel.height > panel.width
+        let sourceSize = portraitCarbit ? InstrumentFrameSize(width: 1904, height: 672)
+            : InstrumentFrameSize(width: 960, height: 544)
+        let touches = Box<[[TouchPoint]]>([])
         let expectedSize = expected ?? profile.preferredSize
         let announcement = try TailingSocket.listening(localIP: "127.0.0.1", port: 0)
         defer { announcement.close() }
@@ -222,7 +227,8 @@ struct TailingTests {
         reservations.forEach { $0.close() }
         let connection = TailingConnection(localIP: "127.0.0.1", targetIP: "127.0.0.1", profile: profile,
             phone: TailingPhoneInfo(package: "test.ninebot", versionCode: 2, model: "iPhone", systemVersion: "17.0", width: 1320, height: 2868, rotation: 0),
-            ports: ports, identityProvider: { identity }, log: { _ in })
+            ports: ports, identityProvider: { identity }, sourceSize: sourceSize,
+            onCarbitTouches: { _, points in touches.set(touches.get() + [points]) }, log: { _ in })
         defer { connection.close() }
         let result = Box<Error?>(nil)
         let done = DispatchGroup(); done.enter()
@@ -234,7 +240,6 @@ struct TailingTests {
         let name = profile == .carbit ? "CARBIT-TEST" : profile.isZeeho ? "ZEEHO-TEST" : "TL-DASH-V2"
         let jpeg = Data([0xff, 0xd8, 1, 2, 0xff, 0xd9])
         let resizedSize = InstrumentFrameSize(width: 1280, height: 720)
-        let portraitCarbit = profile == .carbit && panel.height > panel.width
         let formats: [TailingVideoFormat] = profile == .carbit ? (portraitCarbit ? [.h264] : [.h264, .jpeg, .h264])
             : (usesH264 ? [.h264, .h264] : [.jpeg])
         let stubH264 = Data([0, 0, 0, 1, 0x65, 1, 2, 3])
@@ -337,9 +342,45 @@ struct TailingTests {
                            configured.payload.uint16LE(4) == expectedSize.width &&
                            configured.payload.uint16LE(6) == expectedSize.height, "媒体配置回应")
                 // 连续心跳、启动请求，验证不会丢弃配置后的消息。
+                func touch(_ action: UInt16, x: UInt16, y: UInt16, finger: UInt16) throws -> Data {
+                    var payload = Data()
+                    for value in [action, x, y, finger, 0] { payload.appendLE(value) }
+                    payload.appendLE(UInt64(12345))
+                    return try TailingProtocol.auxiliary(0x20, payload: payload)
+                }
+                let down = try touch(2, x: 716, y: 1600, finger: 8)
+                try aux.write(down)
                 try aux.write(TailingProtocol.auxiliary(0x40, token: 58) + TailingProtocol.auxiliary(0x70, token: 59))
                 try expect(try TailingProtocol.readAuxiliary { try aux.readExactly($0) }.token == 58, "媒体心跳回应")
                 try expect(try TailingProtocol.readAuxiliary { try aux.readExactly($0) }.command == 0x71, "媒体启动回应")
+                try expect(touches.get().isEmpty, "启动前的触摸不能传给 CarPlay")
+                if portraitCarbit {
+                    try aux.write(touch(2, x: 716, y: 200, finger: 4)) // top letterbox
+                    try aux.write(touch(3, x: 716, y: 1600, finger: 4))
+                    try aux.write(TailingProtocol.auxiliary(0x20, payload: Data(count: 8)))
+                    try aux.write(touch(4, x: 716, y: 1600, finger: 4)) // unrelated key
+                    try aux.write(down)
+                    try aux.write(touch(3, x: 1800, y: 1200, finger: 8))
+                    try aux.write(touch(2, x: 358, y: 1474, finger: 5))
+                    try aux.write(touch(1, x: 0, y: 0, finger: 8))
+                    try aux.write(touch(1, x: 0, y: 0, finger: 5))
+                    try aux.write(TailingProtocol.auxiliary(0x40, token: 78))
+                    try expect(try TailingProtocol.readAuxiliary { try aux.readExactly($0) }.token == 78, "触摸后的媒体心跳")
+                    let reports = touches.get()
+                    try expect(reports.map(\.count) == [1, 1, 2, 1, 0], "双指按下、移动、抬起及黑边过滤")
+                    let middle = reports[0][0], corner = reports[1][0], quarter = reports[3][0]
+                    try expect(middle.id == 8 && abs(middle.x - 0.5) < 0.003 && abs(middle.y - 0.5) < 0.003 &&
+                               corner.x == 1 && corner.y == 0 && quarter.id == 5 &&
+                               abs(quarter.x - 0.25) < 0.003 && abs(quarter.y - 0.25) < 0.003,
+                               "1440×3200 车机触控应映射到 1904×672 源画面，移动出边缘时保留抬起")
+                    try aux.write(down)
+                    try configure(resizedSize, .h264, token: 79)
+                    try expect(try TailingProtocol.readAuxiliary { try aux.readExactly($0) }.token == 79 &&
+                               touches.get().last == [], "协商新尺寸时释放原来的手指")
+                    try configure(panel, .h264, token: 80)
+                    try expect(try TailingProtocol.readAuxiliary { try aux.readExactly($0) }.token == 80, "恢复竖屏")
+                    print("PASS: Carbit portrait touch return, two fingers, bounds, release and renegotiation")
+                }
                 let video = try connect(ports.video)
                 #if TAILING_MEDIA_SMOKE
                 if profile == .carbit {
@@ -438,8 +479,6 @@ struct TailingTests {
         #if TAILING_MEDIA_SMOKE
         if profile == .carbit {
             let output = PXCH264Output()
-            let sourceSize = portraitCarbit ? InstrumentFrameSize(width: 1904, height: 672)
-                : InstrumentFrameSize(width: 960, height: 544)
             let bars = try makeH264TestBars(sourceSize)
             requestTestPicture.set(output.requestCarbitTestPicture)
             startLivePicture.set { output.append(bars, codec: .h264, keyframe: true) }
