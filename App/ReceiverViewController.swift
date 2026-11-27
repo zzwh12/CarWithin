@@ -3010,6 +3010,11 @@ extension ReceiverViewController {
             rows.append(.page(CWL("查找局域网车机"), icon: ("wifi", .systemBlue)) { [unowned self] in self.carbitDiscoveryPage() })
         }
         rows.append(.field(CWL("车机 IP"), carbitAddressField, placeholder: CWL("车机的局域网 IPv4")))
+        if running {
+            rows.append(.action(CWL("发送 5 秒测试色条"), icon: ("tv", .systemBlue)) { [weak self] in
+                self?.receiver.requestCarbitTestPicture()
+            })
+        }
         rows.append(.note(carbitStatus))
         return [SettingsSection(CWL("亿连直连（实验）"), footer: CWL("在车机打开亿连，iPhone 加入与车机互通的 Wi-Fi 并保存同名预设。CarWithin 按车机请求发送 H.264 或 JPEG 画面。声音走 iPhone 或蓝牙，触控在 iPhone 上操作。"), rows)]
     }

@@ -25,6 +25,18 @@ final class AccessoryMessagesTests: XCTestCase {
         XCTAssertThrowsError(try AccessoryMessages.WiFi(ssid: "Test\0bad", password: ""))
         XCTAssertThrowsError(try AccessoryMessages.WiFi(ssid: "Test", password: "", channel: 0))
     }
+    func testChineseSSIDPreservesUTF8AtTheByteLimit() throws {
+        let name = "蒙迪欧-" + String(repeating: "车", count: 7) + "A"
+        XCTAssertEqual(name.utf8.count, 32)
+        let wifi = try AccessoryMessages.WiFi(ssid: name, password: "")
+        let message = try AccessoryMessages.startSession(address: "192.168.1.2", port: 7000,
+            deviceID: "02:03:04:05:06:07", wifi: wifi)
+        let decoded = try IAP2Message.parse(message.encoded())
+        let wireless = try IAP2Parameter.parse(XCTUnwrap(decoded.parameters.first { $0.id == 1 }).value)
+        XCTAssertEqual(wireless.first { $0.id == 0 }?.value, Data(name.utf8) + Data([0]))
+        XCTAssertEqual(try OPACK.encode(.string(name)), Data([0x60]) + Data(name.utf8))
+        XCTAssertThrowsError(try AccessoryMessages.WiFi(ssid: name + "B", password: ""))
+    }
     func testSessionPortUsesUInt32EncodingAndNestedAddress() throws {
         let message = try AccessoryMessages.startSession(address: "127.0.0.1", port: 51962, deviceID: "02:03:04:05:06:07")
         let decoded = try IAP2Message.parse(message.encoded())

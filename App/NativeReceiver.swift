@@ -287,6 +287,9 @@ final class NativeReceiver {
         DispatchQueue.main.async { [weak self] in self?.onFailure?() }
     }
     func stop() { queue.async { [weak self] in self?.stopOnQueue() } }
+    func requestCarbitTestPicture() {
+        queue.async { [weak self] in self?.pxcVideoOutput.requestCarbitTestPicture() }
+    }
     private var activeMedia: CarPlayMediaSession? { sessions.values.first(where: { $0.media != nil })?.media }
     /// All fingers currently held by `source` (normalized 0…1); an empty list releases them.
     func touches(source: String, _ points: [TouchPoint]) {
@@ -454,6 +457,10 @@ final class NativeReceiver {
                 let media = CarPlayMediaSession(queue: queue, secret: secret, peerAddress: state.peerAddress,
                                                 audioEnabled: configuration.audioEnabled, hevc: configuration.videoCodec == .h265)
                 media.onLog = { [weak self] in self?.log($0) }
+                media.onEventReady = { [weak self] in
+                    guard let self, self.keyframeAttempts == 0 else { return }
+                    self.sendKeyFrameRequest()
+                }
                 if configuration.browserAudio {
                     media.onBrowserAudio = { [weak self] stream, buffer, stamp in
                         self?.videoOutput.appendAudio(buffer, stream: stream, stamp: stamp)

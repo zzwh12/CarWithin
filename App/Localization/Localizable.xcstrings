@@ -18756,6 +18756,210 @@
         }
       }
     },
+    "回应亿连拉帧": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Replying to the Carbit frame request"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "回应亿连拉帧"
+          }
+        }
+      }
+    },
+    "{1}已发送开始投屏通知": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "{1} sent the start mirroring notification"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "{1}已发送开始投屏通知"
+          }
+        }
+      }
+    },
+    "亿连已协商 {1}，等待车机拉帧": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carbit agreed on {1}. Waiting for the head unit to request a frame."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "亿连已协商 {1}，等待车机拉帧"
+          }
+        }
+      }
+    },
+    "亿连已拉帧，已回应空帧并请求 CarPlay 关键帧": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carbit requested a picture. Sent a zero-length reply and requested a CarPlay keyframe."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "亿连已拉帧，已回应空帧并请求 CarPlay 关键帧"
+          }
+        }
+      }
+    },
+    "车机已拉帧 · {1} · 等待 CarPlay 画面": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Head unit requested video · {1} · Waiting for a CarPlay picture"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "车机已拉帧 · {1} · 等待 CarPlay 画面"
+          }
+        }
+      }
+    },
+    "亿连测试色条已发送 · {1} · {2}": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carbit test bars sent · {1} · {2}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "亿连测试色条已发送 · {1} · {2}"
+          }
+        }
+      }
+    },
+    "已请求测试色条，等待亿连车机拉帧": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Test bars requested. Waiting for the Carbit head unit to pull a frame."
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "已请求测试色条，等待亿连车机拉帧"
+          }
+        }
+      }
+    },
+    "无法创建测试色条画面": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Unable to create the test bars"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无法创建测试色条画面"
+          }
+        }
+      }
+    },
+    "正在发送测试色条 · {1} · {2}": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sending test bars · {1} · {2}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "正在发送测试色条 · {1} · {2}"
+          }
+        }
+      }
+    },
+    "发送 5 秒测试色条": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send test bars for 5 seconds"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "发送 5 秒测试色条"
+          }
+        }
+      }
+    },
+    "亿连像素抽样 · 输入峰值 {1}/255 · 编码前峰值 {2}/255 · 内容区 {3} · 源已解码 {4} 帧": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carbit pixel sample · input peak {1}/255 · pre-encode peak {2}/255 · content area {3} · decoded source frames {4}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "亿连像素抽样 · 输入峰值 {1}/255 · 编码前峰值 {2}/255 · 内容区 {3} · 源已解码 {4} 帧"
+          }
+        }
+      }
+    },
+    "{1}已发送停止投屏通知": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "{1} sent the stop projection notification"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "{1}已发送停止投屏通知"
+          }
+        }
+      }
+    },
     "亿连车机请求 · {1} FPS · wantEncoder={2} · supportCodec={3}": {
       "extractionState": "manual",
       "localizations": {

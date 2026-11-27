@@ -23,6 +23,7 @@ final class CarPlayMediaSession {
     private var videoPackets = 0
     private var videoBytes = 0
     var onLog: ((String) -> Void)?
+    var onEventReady: (() -> Void)?
     var onBrowserAudio: ((Int, AVAudioPCMBuffer, UInt64) -> Void)?
     var onVideo: ((Data, VideoCodec) -> Void)?
     init(queue: DispatchQueue, secret: SymmetricKey, peerAddress: String, audioEnabled: Bool, hevc: Bool) {
@@ -141,6 +142,7 @@ final class CarPlayMediaSession {
         connection.onClose = { [weak self] in self?.event = nil; self?.eventCipher = nil; self?.onLog?(CWL("事件通道已关闭")) }
         connection.start()
         flushNightMode()
+        onEventReady?()
     }
     var hasEventChannel: Bool { event != nil && eventCipher != nil }
     /// Full multitouch state: every slot is reported each time; missing slots report up.

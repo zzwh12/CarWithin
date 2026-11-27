@@ -57,6 +57,8 @@ struct TailingTests {
         }
         try simulatedInstrument(identity: stableIdentity, profile: .carbit,
                                 reported: .init(width: 3840, height: 1200), expected: .init(width: 1920, height: 600))
+        try simulatedInstrument(identity: stableIdentity, profile: .carbit,
+                                reported: .init(width: 1440, height: 3200), expected: .init(width: 486, height: 1080))
         try rejectedInstrument()
         try rejectedInstrument(profile: .carbit)
         print("PASS: Carbit QR parsing, consecutive 0x103a0/0x10020/0x10430 receipts and unknown-command tolerance on both control sockets, H.264 frames, display resize and mirroring capability checks")
@@ -65,6 +67,11 @@ struct TailingTests {
     }
 
     private static func carbitCodes() throws {
+        let chinese = "蒙迪欧-" + String(repeating: "车", count: 7) + "A"
+        try expect(CarbitConnectionCode("WIFI:S:\(chinese);;").ssid == chinese, "中文 SSID 可使用全部 32 个 UTF-8 字节")
+        try expect(CarbitConnectionCode("WIFI:S:\(chinese)B;;").ssid == nil, "超出 32 字节的 SSID 不应写入预设")
+        try expect(CarbitConnectionCode("easyconn://pair?ssid=%E8%92%99%E8%BF%AA%E6%AC%A7").ssid == "蒙迪欧",
+                   "保留连接链接内的中文 SSID")
         let url = CarbitConnectionCode("easyconn://pair?ssid=Ford%20WiFi&huip=192.168.43.1")
         try expect(url.address == "192.168.43.1" && url.ssid == "Ford WiFi", "读取连接参数")
         let json = CarbitConnectionCode(#"{"HUIP":"172.16.0.5","WiFiName":"Ford"}"#)
@@ -226,9 +233,15 @@ struct TailingTests {
         let name = profile == .carbit ? "CARBIT-TEST" : profile.isZeeho ? "ZEEHO-TEST" : "TL-DASH-V2"
         let jpeg = Data([0xff, 0xd8, 1, 2, 0xff, 0xd9])
         let resizedSize = InstrumentFrameSize(width: 1280, height: 720)
-        let formats: [TailingVideoFormat] = profile == .carbit ? [.h264, .jpeg, .h264]
+        let portraitCarbit = profile == .carbit && panel.height > panel.width
+        let formats: [TailingVideoFormat] = profile == .carbit ? (portraitCarbit ? [.h264] : [.h264, .jpeg, .h264])
             : (usesH264 ? [.h264, .h264] : [.jpeg])
         let stubH264 = Data([0, 0, 0, 1, 0x65, 1, 2, 3])
+        #if TAILING_MEDIA_SMOKE
+        let requestTestPicture = Box<(() -> Void)?>(nil)
+        let startLivePicture = Box<(() -> Void)?>(nil)
+        let keyframeRequested = Box(false)
+        #endif
         DispatchQueue.global().async {
             defer { done.leave() }
             var sockets: [TailingSocket] = []
@@ -311,7 +324,8 @@ struct TailingTests {
                 func configure(_ size: InstrumentFrameSize, _ format: TailingVideoFormat, token: UInt32) throws {
                     var config = Data()
                     config.appendLE(UInt16(size.width)); config.appendLE(UInt16(size.height))
-                    config.appendLE(UInt32(30)); config.appendLE(format.rawValue); config.appendLE(UInt32(3))
+                    config.appendLE(UInt32(portraitCarbit ? 0 : 30))
+                    config.appendLE(format.rawValue); config.appendLE(UInt32(portraitCarbit ? 2 : 3))
                     config.append(Data(count: 16)); config.append(Data(signature.base64EncodedString().utf8))
                     try aux.write(TailingProtocol.auxiliary(0x10, token: token, payload: config))
                 }
@@ -326,12 +340,44 @@ struct TailingTests {
                 try expect(try TailingProtocol.readAuxiliary { try aux.readExactly($0) }.token == 58, "媒体心跳回应")
                 try expect(try TailingProtocol.readAuxiliary { try aux.readExactly($0) }.command == 0x71, "媒体启动回应")
                 let video = try connect(ports.video)
+                #if TAILING_MEDIA_SMOKE
+                if profile == .carbit {
+                    let pull = try TailingProtocol.auxiliary(0x72)
+                    try video.write(pull + pull)
+                    for _ in 0..<2 {
+                        try expect(try video.readExactly(4, timeout: 3).uint32LE(0) == 0,
+                                   "CarPlay 首帧到来前，每个拉帧请求应收到一个空帧")
+                    }
+                    try expect(keyframeRequested.get(), "收到首个空帧请求后应请求源关键帧")
+                    guard let showTest = requestTestPicture.get(), let showLive = startLivePicture.get() else {
+                        throw TestError.failed("缺少亿连输出会话")
+                    }
+                    showTest()
+                    let testFormats: [TailingVideoFormat] = portraitCarbit ? [.h264] : [.h264, .jpeg]
+                    for format in testFormats {
+                        try configure(panel, format, token: 70)
+                        let reply = try TailingProtocol.readAuxiliary { try aux.readExactly($0) }
+                        try expect(reply.command == 0x11 && reply.token == 70 && reply.payload.uint32LE(0) == format.rawValue,
+                                   "测试画面应遵循接收端协商的编码")
+                        try video.write(pull)
+                        let length = Int(try video.readExactly(4).uint32LE(0))
+                        try expect((1...8 * 1024 * 1024).contains(length), "收到测试画面")
+                        let frame = try video.readExactly(length)
+                        if format == .jpeg { try verifyJPEGTestBars(frame, size: expectedSize, greenCenter: true) }
+                        else { try verifyH264TestBars(frame, size: expectedSize, greenCenter: true) }
+                    }
+                    showLive()
+                    // Some receivers pause their pulls; the next picture must be the live source.
+                    Thread.sleep(forTimeInterval: 5.5)
+                    print("PASS: Carbit answered two early pulls and displayed RGB bars in \(testFormats.map(\.name)) without a CarPlay frame")
+                }
+                #endif
                 for (index, format) in formats.enumerated() {
                     let resized = profile == .carbit && index > 0
                     let size = resized ? resizedSize : expectedSize
-                    if resized {
+                    if profile == .carbit {
                         let token = UInt32(61 + index)
-                        try configure(size, format, token: token)
+                        try configure(resized ? resizedSize : panel, format, token: token)
                         let reply = try TailingProtocol.readAuxiliary { try aux.readExactly($0) }
                         try expect(reply.command == 0x11 && reply.token == token && reply.payload.uint32LE(0) == format.rawValue &&
                                    reply.payload.uint16LE(4) == size.width && reply.payload.uint16LE(6) == size.height,
@@ -347,7 +393,7 @@ struct TailingTests {
                     #if TAILING_MEDIA_SMOKE
                     if profile == .carbit {
                         if format == .jpeg { try verifyJPEGTestBars(frame, size: size) }
-                        else { try verifyH264TestBars(frame, size: size) }
+                        else { try verifyH264TestBars(frame, size: size, contentHeight: portraitCarbit ? 172 : nil) }
                         print("PASS: Carbit pull \(index + 1), decoded \(format.name) red/blue bars at \(size)")
                         continue
                     }
@@ -374,7 +420,10 @@ struct TailingTests {
                 idleFramesReceived.signal()
                 // 保持连接，主线程关闭会话以取消下一次视频读取。
                 if usesH264 {
-                    let stop = try TailingProtocol.readControl { try reverse.readExactly($0, timeout: 2) }
+                    var stop = try TailingProtocol.readControl { try reverse.readExactly($0, timeout: 2) }
+                    while stop.command == 0x70000000 {
+                        stop = try TailingProtocol.readControl { try reverse.readExactly($0, timeout: 2) }
+                    }
                     try expect(stop.command == 0x20590 && (try TailingProtocol.object(stop.payload)["control"] as? Int == 0),
                                "关闭连接前通知仪表停止投屏")
                 } else {
@@ -386,11 +435,14 @@ struct TailingTests {
         #if TAILING_MEDIA_SMOKE
         if profile == .carbit {
             let output = PXCH264Output()
-            let sourceSize = InstrumentFrameSize(width: 960, height: 544)
+            let sourceSize = portraitCarbit ? InstrumentFrameSize(width: 1904, height: 672)
+                : InstrumentFrameSize(width: 960, height: 544)
             let bars = try makeH264TestBars(sourceSize)
-            output.start(connection: connection, sourceSize: sourceSize, onState: { _ in }, requestKeyframe: {})
+            requestTestPicture.set(output.requestCarbitTestPicture)
+            startLivePicture.set { output.append(bars, codec: .h264, keyframe: true) }
+            output.start(connection: connection, sourceSize: sourceSize, onState: { _ in },
+                         requestKeyframe: { keyframeRequested.set(true) })
             stopOutput = output.stop
-            output.append(bars, codec: .h264, keyframe: true)
         }
         #endif
         defer { stopOutput?() }

@@ -142,6 +142,12 @@ final class TailingConnection: @unchecked Sendable {
         return media
     }
 
+    // One zero length answers one Carbit pull while the first picture is still unavailable.
+    func sendEmptyCarbitFrame() throws {
+        do { try videoSocket().write(Data(count: 4)) }
+        catch { throw terminalError(or: TailingError.channel(CWL("回应亿连拉帧"), error)) }
+    }
+
     // 视频请求与发送由同一个会话任务顺序执行。
     func sendFrame(_ frame: Data, format: TailingVideoFormat) throws {
         let socket = try videoSocket()
@@ -181,7 +187,11 @@ final class TailingConnection: @unchecked Sendable {
         let pullStarted = ProcessInfo.processInfo.systemUptime
         let request: TailingProtocol.Auxiliary
         do {
-            request = try TailingProtocol.readAuxiliary { try socket.readExactly($0, timeout: 5) }
+            var waitingForHeader = profile == .carbit
+            request = try TailingProtocol.readAuxiliary { count in
+                defer { waitingForHeader = false }
+                return try socket.readExactly(count, timeout: 5, waitForFirstByte: waitingForHeader)
+            }
         } catch {
             throw terminalError(or: TailingError.channel(CWL("等待视频拉帧请求"), error))
         }
@@ -222,7 +232,7 @@ final class TailingConnection: @unchecked Sendable {
         if let reverse {
             do {
                 try sendMirrorControl(reverse, start: false, identifier: UInt32.max, timeout: 0.25)
-                log(CWL("极核已发送停止投屏通知"))
+                log(CWL("{1}已发送停止投屏通知", [profile.name]))
             } catch {
                 log(CWL("极核停止通知发送失败：{1}", [String(describing: error.localizedDescription)]))
             }
@@ -387,7 +397,7 @@ final class TailingConnection: @unchecked Sendable {
         guard reverseControl == nil else { return }
         try sendMirrorControl(socket, start: true, identifier: 6, timeout: 0.25)
         reverseControl = socket
-        log(CWL("极核已发送开始投屏通知"))
+        log(CWL("{1}已发送开始投屏通知", [profile.name]))
         condition.broadcast()
     }
 

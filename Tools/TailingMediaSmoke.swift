@@ -53,7 +53,7 @@ func makeH264TestBars(_ size: InstrumentFrameSize) throws -> Data {
     return try result.get().data
 }
 
-func verifyH264TestBars(_ data: Data, size: InstrumentFrameSize) throws {
+func verifyH264TestBars(_ data: Data, size: InstrumentFrameSize, greenCenter: Bool = false, contentHeight: Int? = nil) throws {
     var parameters = VideoParameterSets(codec: .h264)
     var picture: [Data] = []
     for unit in try AnnexB.units(in: data) {
@@ -78,11 +78,20 @@ func verifyH264TestBars(_ data: Data, size: InstrumentFrameSize) throws {
     let row = size.height / 2 * CVPixelBufferGetBytesPerRow(buffer)
     let left = row + (size.width / 4) * 4
     let right = row + (size.width * 3 / 4) * 4
+    let middle = row + (size.width / 2) * 4
     try require(bytes[left + 2] > 200 && bytes[left] < 50 && bytes[right] > 200 && bytes[right + 2] < 50,
                 "亿连接收的 H.264 应解出左红右蓝的测试画面")
+    try require(greenCenter ? bytes[middle + 1] > 200 : bytes[middle + 1] < 50, "H.264 画面来源与当前模式应一致")
+    if let contentHeight {
+        let top = (size.height - contentHeight) / 2, bottom = top + contentHeight
+        func red(at y: Int) -> UInt8 { bytes[y * CVPixelBufferGetBytesPerRow(buffer) + size.width / 4 * 4 + 2] }
+        try require(red(at: top - 4) < 40 && red(at: top + 4) > 200 &&
+                    red(at: bottom - 4) > 200 && red(at: bottom + 4) < 40,
+                    "竖屏中应保留居中、等比例的横屏图像")
+    }
 }
 
-func verifyJPEGTestBars(_ data: Data, size: InstrumentFrameSize) throws {
+func verifyJPEGTestBars(_ data: Data, size: InstrumentFrameSize, greenCenter: Bool = false) throws {
     guard data.starts(with: [0xff, 0xd8]), let source = CGImageSourceCreateWithData(data as CFData, nil),
           let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
         throw MediaSmokeError(message: "JPEG 不可解码")
@@ -99,8 +108,10 @@ func verifyJPEGTestBars(_ data: Data, size: InstrumentFrameSize) throws {
     }
     let left = (size.height / 2 * size.width + size.width / 4) * 4
     let right = (size.height / 2 * size.width + size.width * 3 / 4) * 4
+    let middle = (size.height / 2 * size.width + size.width / 2) * 4
     try require(pixels[left] > 220 && pixels[left + 2] < 35 && pixels[right + 2] > 220 && pixels[right] < 35,
                 "JPEG 应解出左红右蓝的测试画面")
+    try require(greenCenter ? pixels[middle + 1] > 200 : pixels[middle + 1] < 50, "JPEG 画面来源与当前模式应一致")
 }
 
 /// Real VT H.264 → decoder → Core Image JPEG → pull-frame socket round trip on loopback.
