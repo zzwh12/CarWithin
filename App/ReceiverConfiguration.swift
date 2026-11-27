@@ -32,6 +32,8 @@ struct ReceiverConfiguration {
     var zeehoProfile: TailingDisplayProfile = .zeeho62
     var zeehoFrameRate: ZeehoFrameRate = .fps25
     var zeehoVideoMode: ZeehoVideoMode = .transcode
+    /// CarbitLink encode/refresh target. 30 FPS is the validated default; 60 FPS is experimental.
+    var carbitFrameRate: ZeehoFrameRate = .fps30
     /// 春风仪表（MotoPlay / PXC）：手机监听 10920/10921/10922，向仪表 10930 探测。
     /// 留空表示自动取本机所在网段的网关（仪表热点一般是 .1）。
     var cfmotoAddress: String?

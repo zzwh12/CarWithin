@@ -474,7 +474,10 @@ final class PXCH264Output {
         }
 
         private func bitrate(for size: InstrumentFrameSize) -> Int {
-            profile == .carbit ? min(8_000_000, max(1_000_000, size.width * size.height * 4)) : frameRate.bitrate
+            guard profile == .carbit else { return frameRate.bitrate }
+            // 30 FPS is the tuned baseline; keep the per-second budget proportional to the cadence.
+            let scaled = size.width * size.height * 4 * frameRate.rawValue / 30
+            return min(8_000_000, max(1_000_000, scaled))
         }
 
         private func encode(_ image: CVPixelBuffer, size: InstrumentFrameSize, at now: Double, forceKeyframe: Bool) -> H264EncodedFrame? {

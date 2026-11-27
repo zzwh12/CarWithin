@@ -95,6 +95,11 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     /// 0 = follow the head unit's screen, 1 = the fixed resolution.
     private let sizeModeControl = ChoiceMenu(items: [CWL("跟随车机"), CWL("固定尺寸"), CWL("自定义尺寸")])
     private let carbitSizeModeControl = ChoiceMenu(items: [CWL("固定尺寸"), CWL("自定义尺寸")])
+    /// CarbitLink output cadence; 60 FPS is opt-in because the head unit must keep up.
+    private let carbitFrameRateControl = ChoiceMenu(items: [CWL("30 FPS"), CWL("60 FPS（实验）")])
+    private var selectedCarbitFrameRate: ZeehoFrameRate {
+        carbitFrameRateControl.selectedSegmentIndex == 1 ? .fps60 : .fps30
+    }
     private let iconSizeControl = ChoiceMenu(items: ReceiverConfiguration.iconSizes.map { "\($0.title)（\($0.widthMM) mm）" })
     private let autoRestartSwitch = UISwitch()
     private let performanceControl = ChoiceMenu(items: BrowserPerformance.allCases.map(\.title))
@@ -904,6 +909,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         defaults.set(["auto", "h264", "h265"][max(0, codecControl.selectedSegmentIndex)], forKey: "videoCodec")
         defaults.set(sizeModeControl.selectedSegmentIndex, forKey: "displaySizeMode")
         defaults.set(carbitSizeModeControl.selectedSegmentIndex == 1, forKey: "carbitCustomSizeEnabled")
+        defaults.set(selectedCarbitFrameRate.rawValue, forKey: "carbitFrameRate")
         defaults.set(ReceiverConfiguration.iconSizes[max(0, iconSizeControl.selectedSegmentIndex)].widthMM, forKey: "widthPhysicalMM")
         defaults.set(selectedPerformance.rawValue, forKey: "browserPerformance")
         defaults.set(autoRestartSwitch.isOn, forKey: "autoRestart")
@@ -991,7 +997,8 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         default: fps = screen.map { (1..<45).contains($0.refreshHz) ? 30 : 60 } ?? 60
         }
         if lightLevel >= 1 { fps = min(fps, 30) }
-        if outputMode != .browser { fps = min(fps, 30) }
+        if outputMode == .carbit { fps = selectedCarbitFrameRate.sourceFPS }
+        if outputMode != .browser { fps = min(fps, outputMode == .carbit ? 60 : 30) }
         var codec: VideoCodec
         switch codecControl.selectedSegmentIndex {
         case 1: codec = .h264
@@ -1279,7 +1286,10 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
             config.ninebotAddress = (activeNinebotAddressField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             config.ninebotMode = mode
         }
-        if outputMode == .carbit { config.carbitAddress = carbitAddress }
+        if outputMode == .carbit {
+            config.carbitAddress = carbitAddress
+            config.carbitFrameRate = selectedCarbitFrameRate
+        }
         if outputMode.requiresWiFiInterface {
             let screen = view.window?.screen ?? UIScreen.main
             let orientation = view.window?.windowScene?.interfaceOrientation
@@ -1900,7 +1910,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
         aspectRatioControl.isEnabled = value
         frameRateControl.isEnabled = value
         codecControl.isEnabled = value
-        [sizeModeControl, carbitSizeModeControl, iconSizeControl, performanceControl].forEach { $0.isEnabled = value }
+        [sizeModeControl, carbitSizeModeControl, carbitFrameRateControl, iconSizeControl, performanceControl].forEach { $0.isEnabled = value }
         [autoRestartSwitch, showTouchesSwitch, carButtonSwitch].forEach { $0.isEnabled = value }
         driveControl.isEnabled = value
         bluetoothSetupSwitch.isEnabled = value
@@ -2133,6 +2143,9 @@ extension ReceiverViewController {
         }.map { $0 + 1 } ?? 0
         sizeModeControl.selectedSegmentIndex = defaults.object(forKey: "displaySizeMode") as? Int ?? 0
         carbitSizeModeControl.selectedSegmentIndex = defaults.bool(forKey: "carbitCustomSizeEnabled") ? 1 : 0
+        carbitFrameRateControl.selectedSegmentIndex =
+            (ZeehoFrameRate(rawValue: defaults.integer(forKey: "carbitFrameRate")) ?? .fps30) == .fps60 ? 1 : 0
+        carbitFrameRateControl.addTarget(self, action: #selector(displaySettingChanged), for: .valueChanged)
         frameRateControl.selectedSegmentIndex = [0: 0, 30: 1, 60: 2][defaults.object(forKey: "displayMaxFPS") as? Int ?? 60] ?? 2
         codecControl.selectedSegmentIndex = ["auto": 0, "h264": 1, "h265": 2][defaults.string(forKey: "videoCodec") ?? "h264"] ?? 1
         let savedWidth = defaults.object(forKey: "widthPhysicalMM") as? Int ?? CarPlayInfo.defaultWidthPhysicalMM
@@ -2609,10 +2622,11 @@ extension ReceiverViewController {
                     rows.append(.control(CWL("分辨率"), icon: ("display", .systemGreen), resolutionControl))
                     rows.append(.control(CWL("画面比例"), icon: ("aspectratio", .systemGreen), aspectRatioControl))
                 }
+                rows.append(.control(CWL("帧率"), icon: ("speedometer", .systemOrange), carbitFrameRateControl))
                 rows.append(.control(CWL("CarPlay 图标大小"), icon: ("square.grid.2x2.fill", .systemPurple), iconSizeControl))
                 return [
-                    SettingsSection(CWL("亿连画面"), footer: CWL("按车机请求的尺寸等比缩放 CarPlay 画面，宽高比不同时保留黑边。"), [
-                        .info(CWL("车机视频"), CWL("H.264 / JPEG · 最高 1920×1080 · 30 FPS"))
+                    SettingsSection(CWL("亿连画面"), footer: CWL("按车机请求的尺寸等比缩放 CarPlay 画面，宽高比不同时保留黑边。60 FPS 为实验项，实际发送帧率取决于车机拉帧速度。"), [
+                        .info(CWL("车机视频"), CWL("H.264 / JPEG · 最高 1920×1080 · 30/60 FPS"))
                     ]),
                     SettingsSection(CWL("本机 CarPlay"), rows)
                 ]

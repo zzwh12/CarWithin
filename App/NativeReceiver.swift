@@ -138,7 +138,7 @@ final class NativeReceiver {
                             self?.touches(source: "carbit-\(id)", points, generation: run)
                         }, log: { [weak self] in self?.log($0) })
                     self.pxcVideoOutput.start(connection: connection,
-                        frameRate: profile == .carbit ? .fps30 : configuration.zeehoFrameRate,
+                        frameRate: profile == .carbit ? configuration.carbitFrameRate : configuration.zeehoFrameRate,
                         videoMode: configuration.zeehoVideoMode,
                         sourceSize: sourceSize, onPreview: self.onCarbitPreview,
                         onState: { [weak self] message in

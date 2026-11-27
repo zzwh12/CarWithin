@@ -18654,19 +18654,19 @@
         }
       }
     },
-    "按车机请求的尺寸等比缩放 CarPlay 画面，宽高比不同时保留黑边。": {
+    "按车机请求的尺寸等比缩放 CarPlay 画面，宽高比不同时保留黑边。60 FPS 为实验项，实际发送帧率取决于车机拉帧速度。": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "CarPlay fits the size requested by the head unit. Black bars preserve the picture’s aspect ratio."
+            "value": "CarPlay fits the size requested by the head unit. Black bars preserve the picture’s aspect ratio. 60 FPS is experimental; the actual send rate follows how fast the head unit pulls frames."
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "按车机请求的尺寸等比缩放 CarPlay 画面，宽高比不同时保留黑边。"
+            "value": "按车机请求的尺寸等比缩放 CarPlay 画面，宽高比不同时保留黑边。60 FPS 为实验项，实际发送帧率取决于车机拉帧速度。"
           }
         }
       }
@@ -18688,19 +18688,53 @@
         }
       }
     },
-    "H.264 / JPEG · 最高 1920×1080 · 30 FPS": {
+    "H.264 / JPEG · 最高 1920×1080 · 30/60 FPS": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "H.264 / JPEG · Up to 1920×1080 · 30 FPS"
+            "value": "H.264 / JPEG · Up to 1920×1080 · 30/60 FPS"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "H.264 / JPEG · 最高 1920×1080 · 30 FPS"
+            "value": "H.264 / JPEG · 最高 1920×1080 · 30/60 FPS"
+          }
+        }
+      }
+    },
+    "30 FPS": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "30 FPS"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "30 FPS"
+          }
+        }
+      }
+    },
+    "60 FPS（实验）": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "60 FPS (Experimental)"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "60 FPS（实验）"
           }
         }
       }
