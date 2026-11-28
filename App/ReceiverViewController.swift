@@ -2446,6 +2446,7 @@ extension ReceiverViewController {
                 ]),
                 SettingsSection(CWL("支持"), [
                     .page(CWL("诊断与实验"), icon: ("stethoscope", .systemTeal)) { [unowned self] in self.diagnosticsPage() },
+                    .page(CWL("日志反馈"), icon: ("text.bubble.fill", .systemBlue)) { LogFeedbackViewController() },
                     .page(CWL("关于"), icon: ("info.circle.fill", .systemGray)) { [unowned self] in self.aboutPage() }
                 ])
             ]

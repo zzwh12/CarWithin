@@ -148,7 +148,7 @@ Cards currently appear in the phone CarPlay preview and Ninebot 5/7-inch video. 
 
 ## Feedback, support and contributors
 
-The Support section in Settings contains Diagnostics and experiments and About. Copy diagnostic logs from Diagnostics and experiments → Logs → Copy logs, and check for unrelated personal information before submitting them.
+To report a problem, open **Settings → Support → Diagnostics & Experiments → Logs** and tap **Copy logs**. Return to **Support → Log Feedback** to open the feedback form inside CarWithin. Paste the logs and remove any unrelated personal information before submitting.
 
 About → Appreciation & Support lists supporters and development/testing contributions. Support is optional and does not affect features, updates or adaptation priorities.
 

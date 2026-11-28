@@ -10837,6 +10837,23 @@
         }
       }
     },
+    "日志反馈": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Log Feedback"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "日志反馈"
+          }
+        }
+      }
+    },
     "日志": {
       "extractionState": "manual",
       "localizations": {

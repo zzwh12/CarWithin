@@ -1,5 +1,41 @@
 import UIKit
 import Photos
+import WebKit
+
+final class LogFeedbackViewController: UIViewController, WKNavigationDelegate {
+    private static let formURL = URL(string: "https://logport.fireflyz.cc/")!
+    private let webView = WKWebView()
+
+    override func loadView() { view = webView }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        title = CWL("日志反馈")
+        webView.navigationDelegate = self
+        loadForm()
+    }
+
+    @objc private func loadForm() {
+        navigationItem.prompt = nil
+        navigationItem.rightBarButtonItem = nil
+        webView.load(URLRequest(url: Self.formURL))
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        showLoadError(error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        showLoadError(error)
+    }
+
+    private func showLoadError(_ error: Error) {
+        guard (error as? URLError)?.code != .cancelled else { return }
+        navigationItem.prompt = error.localizedDescription
+        navigationItem.rightBarButtonItem = UIBarButtonItem(title: CWL("重试"), style: .plain,
+                                                           target: self, action: #selector(loadForm))
+    }
+}
 
 enum DeveloperSupport {
     static let email = "hl8380@qq.com"
