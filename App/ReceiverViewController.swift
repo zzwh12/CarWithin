@@ -102,6 +102,7 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     }
     private let iconSizeControl = ChoiceMenu(items: ReceiverConfiguration.iconSizes.map { "\($0.title)（\($0.widthMM) mm）" })
     private let autoRestartSwitch = UISwitch()
+    private let autoConnectOnLaunchSwitch = UISwitch()
     private let performanceControl = ChoiceMenu(items: BrowserPerformance.allCases.map(\.title))
     private let showTouchesSwitch = UISwitch()
     private let carButtonSwitch = UISwitch()
@@ -356,22 +357,23 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
     private var identity: AccessoryIdentity?
     private var running = false
     private var lines: [String] = []
-    private var launchedTransportTest = false
+    private var handledLaunch = false
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
-        if !running { modeChanged() }
+        if !running && !waitingForNetwork { modeChanged() }
+        guard !handledLaunch else { return }
+        handledLaunch = true
         #if DEBUG
-        if !launchedTransportTest, ProcessInfo.processInfo.arguments.contains("--test-same-device-transport") {
-            launchedTransportTest = true
+        if ProcessInfo.processInfo.arguments.contains("--test-same-device-transport") {
             revealSettings()
             testSameDeviceTransport()
-        } else if !launchedTransportTest, ProcessInfo.processInfo.arguments.contains("--test-local-transport") {
-            launchedTransportTest = true
+            return
+        } else if ProcessInfo.processInfo.arguments.contains("--test-local-transport") {
             modeControl.selectedSegmentIndex = 1; modeChanged(); toggleReceiver()
-        } else if !launchedTransportTest, let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--open-settings") {
+            return
+        } else if let index = ProcessInfo.processInfo.arguments.firstIndex(of: "--open-settings") {
             // Screenshots: --open-settings [display|screens|wifi|presets|vehicle|sound|output|web|log|lab|about|usage]
-            launchedTransportTest = true
             revealSettings()
             let arguments = ProcessInfo.processInfo.arguments
             let pages: [String: () -> UIViewController] = [
@@ -391,8 +393,12 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
                     self?.showVersionHistory()
                 }
             }
+            return
         }
         #endif
+        if autoConnectOnLaunchSwitch.isOn, startButton.isEnabled, !running, !waitingForNetwork {
+            toggleReceiver()
+        }
     }
 
     override func viewDidLoad() {
@@ -1595,6 +1601,10 @@ final class ReceiverViewController: UIViewController, CLLocationManagerDelegate 
             log(CWL("无法保存身份导入结果：{1}", [String(describing: error.localizedDescription)]))
         }
     }
+    @objc private func autoConnectOnLaunchChanged(_ sender: UISwitch) {
+        UserDefaults.standard.set(sender.isOn, forKey: "autoConnectOnLaunch")
+    }
+
     @objc private func toggleReceiver() {
         if running || waitingForNetwork { stop(); return }
         if modeControl.selectedSegmentIndex != 2, outputMode == .carbit, !CarbitConnectionCode.isLocalAddress(carbitAddress) {
@@ -2133,6 +2143,8 @@ extension ReceiverViewController {
         performanceControl.selectedSegmentIndex = BrowserPerformance.allCases.firstIndex(of:
             BrowserPerformance(rawValue: defaults.string(forKey: "browserPerformance") ?? "") ?? .auto) ?? 0
         autoRestartSwitch.isOn = defaults.object(forKey: "autoRestart") as? Bool ?? false
+        autoConnectOnLaunchSwitch.isOn = defaults.bool(forKey: "autoConnectOnLaunch")
+        autoConnectOnLaunchSwitch.addTarget(self, action: #selector(autoConnectOnLaunchChanged(_:)), for: .valueChanged)
         showTouchesSwitch.isOn = defaults.bool(forKey: "showTouches")
         carButtonSwitch.isOn = defaults.object(forKey: "carButton") as? Bool ?? true
         for menu in [sizeModeControl, carbitSizeModeControl] {
@@ -2414,6 +2426,7 @@ extension ReceiverViewController {
             connection.append(.page(CWL("Wi-Fi 预设"), icon: ("list.bullet", .systemBlue), detail: { WiFiPresetStore.selected()?.ssid ?? CWL("未选择") }) { [unowned self] in self.presetsPage() })
             connection.append(.control(CWL("当前输出"), icon: ("point.3.connected.trianglepath.dotted", .systemIndigo), headUnitOutput))
             connection.append(.page(CWL("输出设置"), icon: ("slider.horizontal.3", .systemGray)) { [unowned self] in self.headUnitPage() })
+            connection.append(.control(CWL("启动时自动连接"), icon: ("power", .systemGreen), autoConnectOnLaunchSwitch))
             if outputMode == .browser {
                 connection.append(.page(CWL("HTTPS 设置"), icon: ("lock.shield", .systemBlue)) { [unowned self] in self.httpsSettingsPage() })
             }

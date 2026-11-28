@@ -1,6 +1,6 @@
 # 源码构建说明 / Build from source
 
-本候选对应 CarWithin **1.0.5（20）**。应用版本与构建号仅来自 `App/Info.plist`。
+本候选对应 CarWithin **1.0.5（21）**。应用版本与构建号仅来自 `App/Info.plist`。
 
 需要 Xcode，最低部署目标为 iOS/iPadOS 16.0。项目包含中英文界面资源、浏览器接收页、支持名单资源及完整第三方许可。请从同一版本的标签或源码附件构建，不混用其他版本的 Swift 文件和资源。
 

@@ -14260,6 +14260,23 @@
         }
       }
     },
+    "启动时自动连接": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect on Launch"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "启动时自动连接"
+          }
+        }
+      }
+    },
     "自动重启": {
       "extractionState": "manual",
       "localizations": {
