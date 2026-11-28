@@ -49,6 +49,7 @@ final class NativeReceiver {
     // forceKeyFrame state: throttled sends, resent every second until a keyframe arrives.
     private var keyframeWantedSince: DispatchTime?
     private var keyframeLastSent: DispatchTime?
+    private var keyframeRetry: DispatchWorkItem?
     private var keyframeAttempts = 0
     private var keyframeReason = ""
     private var touchSlots = TouchSlots(count: CarPlayInfo.touchContacts)
@@ -346,37 +347,44 @@ final class NativeReceiver {
         queue.async { [weak self] in self?.requestKeyFrameOnQueue(reason: reason) }
     }
     private func requestKeyFrameOnQueue(reason: String) {
-        let now = DispatchTime.now()
-        if keyframeWantedSince == nil { keyframeWantedSince = now; keyframeAttempts = 0; keyframeReason = reason }
-        // 250 ms throttle: several viewers recovering together share one request.
-        if let last = keyframeLastSent, now.uptimeNanoseconds - last.uptimeNanoseconds < 250_000_000 { return }
+        guard keyframeWantedSince == nil else { return }
+        keyframeWantedSince = .now(); keyframeAttempts = 0; keyframeReason = reason
         sendKeyFrameRequest()
     }
+
+    private func scheduleKeyFrameRequest(at deadline: DispatchTime) {
+        let retry = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.keyframeRetry = nil
+            self.sendKeyFrameRequest()
+        }
+        keyframeRetry = retry
+        queue.asyncAfter(deadline: deadline, execute: retry)
+    }
+
     private func sendKeyFrameRequest() {
-        guard keyframeWantedSince != nil else { return }
+        guard keyframeWantedSince != nil, keyframeRetry == nil else { return }
+        let now = DispatchTime.now()
+        if let last = keyframeLastSent, last + .milliseconds(250) > now {
+            scheduleKeyFrameRequest(at: last + .milliseconds(250))
+            return
+        }
         guard let media = sessions.values.first(where: { $0.media?.hasEventChannel == true })?.media else { return }
         keyframeAttempts += 1
-        keyframeLastSent = .now()
-        guard media.requestKeyFrame() else { return }
-        if keyframeAttempts == 1 { log(CWL("已请求关键帧（{1}）", [String(describing: keyframeReason)])) }
+        keyframeLastSent = now
+        if media.requestKeyFrame(), keyframeAttempts == 1 { log(CWL("已请求关键帧（{1}）", [String(describing: keyframeReason)])) }
         guard keyframeAttempts < 8 else {
             log(CWL("iPhone 未响应关键帧请求（已重试 {1} 次），等待自然关键帧", [String(describing: keyframeAttempts)]))
             keyframeWantedSince = nil; return
         }
-        let run = generation
-        queue.asyncAfter(deadline: .now() + 1) { [weak self] in
-            guard let self, self.generation == run, self.keyframeWantedSince != nil else { return }
-            self.sendKeyFrameRequest()
-        }
+        scheduleKeyFrameRequest(at: now + .seconds(1))
     }
     private func keyframeArrived() {
         guard let since = keyframeWantedSince else { return }
         keyframeWantedSince = nil
+        keyframeRetry?.cancel(); keyframeRetry = nil
         let ms = (DispatchTime.now().uptimeNanoseconds - since.uptimeNanoseconds) / 1_000_000
         log(CWL("关键帧已到达（{1} ms，{2} 次请求）", [String(describing: ms), String(describing: keyframeAttempts)]))
-    }
-    private static func containsRandomAccess(_ accessUnit: Data, codec: VideoCodec) -> Bool {
-        (try? AnnexB.units(in: accessUnit))?.contains { codec.isRandomAccess($0) } ?? false
     }
     private func stopOnQueue() {
         DispatchQueue.main.async { [weak self] in self?.discoveryService?.stop(); self?.discoveryService = nil }
@@ -397,6 +405,7 @@ final class NativeReceiver {
         diagnosticGap = 0; diagnosticWork = 0; diagnosticMainDelay = 0; diagnosticMainWork = 0
         #endif
         localSkipping = false; keyframeWantedSince = nil; keyframeLastSent = nil; keyframeAttempts = 0
+        keyframeRetry?.cancel(); keyframeRetry = nil
         touchSlots.reset()
         for connection in connections.values { connection.cancel() }
         connections.removeAll()
@@ -466,10 +475,7 @@ final class NativeReceiver {
                 let media = CarPlayMediaSession(queue: queue, secret: secret, peerAddress: state.peerAddress,
                                                 audioEnabled: configuration.audioEnabled, hevc: configuration.videoCodec == .h265)
                 media.onLog = { [weak self] in self?.log($0) }
-                media.onEventReady = { [weak self] in
-                    guard let self, self.keyframeAttempts == 0 else { return }
-                    self.sendKeyFrameRequest()
-                }
+                media.onEventReady = { [weak self] in self?.sendKeyFrameRequest() }
                 if configuration.browserAudio {
                     media.onBrowserAudio = { [weak self] stream, buffer, stamp in
                         self?.videoOutput.appendAudio(buffer, stream: stream, stamp: stamp)
@@ -483,7 +489,8 @@ final class NativeReceiver {
                     defer { self.recordPerformance(arrival: diagnosticArrival, bytes: data.count,
                         work: ProcessInfo.processInfo.systemUptime - diagnosticArrival) }
                     #endif
-                    let keyframe = Self.containsRandomAccess(data, codec: codec)
+                    let units = (try? AnnexB.units(in: data)) ?? []
+                    let keyframe = units.contains { codec.isRandomAccess($0) }
                     if keyframe { self.keyframeArrived() }
                     self.videoOutput.append(data, codec: codec)
                     if configuration.carbitAddress != nil {
@@ -498,7 +505,7 @@ final class NativeReceiver {
                         output.append(data, codec: codec, keyframe: keyframe)
                     }
                     if configuration.tailingAddress != nil { self.tailing.append(data, codec: codec) }
-                    if configuration.carLifeEnabled { self.carLife.append(data, codec: codec) }
+                    if configuration.carLifeEnabled { self.carLife.append(units, codec: codec, keyframe: keyframe) }
                     if configuration.carLinkRelayAddress != nil { self.carLink.append(data, codec: codec) }
                     guard configuration.carbitAddress == nil, self.localVideoEnabled else { return }
                     if self.localSkipping {

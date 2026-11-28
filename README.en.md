@@ -79,7 +79,7 @@ Some connection settings are locked while CarPlay is running; stop the session b
 
 ## Other output methods
 
-- **Wireless CarLife.** For compatible head units, connect the head unit and iPhone to the same Wi-Fi. Select CarLife in CarWithin, open CarLife on the head unit, then start CarPlay. CarWithin can discover the head unit or use an IP address you enter. CarLife carries video and touch input, with H.264 up to 1080p at 30 FPS. Audio can play through the head unit's Bluetooth connection.
+- **Wireless CarLife.** For compatible head units, connect the head unit and iPhone to the same Wi-Fi. Select CarLife in CarWithin, open CarLife on the head unit, then start CarPlay. CarWithin can discover the head unit or use an IP address you enter. CarLife carries video and touch input, with H.264 up to 1080p at 30 FPS. Audio can play through the head unit's Bluetooth connection. If scrolling lags, check the CarLife video entry in diagnostics for the frame submission rate, peak pending writes, and congestion events over the last five seconds.
 - **AirPlay (experimental).** Select AirPlay and start CarPlay. When the display is ready, use the AirPlay picker on the main screen to select a video receiver on the same network. AirPlay video is buffered. Touch input stays on the iPhone, and audio follows the iPhone or head unit Bluetooth route.
 
 Fixed display sizes support common landscape and portrait aspect ratios.

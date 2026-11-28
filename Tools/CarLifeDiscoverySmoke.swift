@@ -4,6 +4,7 @@ import Darwin
 @main
 struct CarLifeDiscoverySmoke {
     static func main() throws {
+        verifyVideoPacing()
         let output = CarLifeOutput()
         output.onLog = { print($0); fflush(stdout) }
         if CommandLine.arguments.count > 1 {
@@ -56,5 +57,32 @@ struct CarLifeDiscoverySmoke {
         output.stop()
         Thread.sleep(forTimeInterval: 0.3)
         print("PASS: discovery response, source filtering, unrelated packets, echo prevention and restart")
+    }
+
+    private static func verifyVideoPacing() {
+        var pacing = CarLifeVideoPacing()
+        func frame(_ keyframe: Bool, pending: Int = 0, bytes: Int = 0) -> CarLifeVideoPacing.Decision {
+            pacing.admit(keyframe: keyframe, pendingWrites: pending, pendingBytes: bytes, fps: 30)
+        }
+        precondition(frame(false) == .skip && frame(true) == .send)
+        pacing.sentKeyframe(at: 0)
+        for pending in 0..<4 { precondition(frame(false, pending: pending) == .send) }
+        precondition(frame(false, pending: 4) == .startDraining)
+        for pending in [4, 3, 2, 1] {
+            precondition(frame(true, pending: pending) == .skip && frame(false, pending: pending) == .skip)
+            precondition(!pacing.needsRefresh(at: 20, pendingWrites: pending, legacy: false))
+        }
+        precondition(pacing.drained() && !pacing.drained(), "Exactly one recovery request per drain")
+        pacing.requestedKeyframe(at: 20)
+        precondition(frame(false) == .skip && frame(true) == .send)
+        pacing.sentKeyframe(at: 21)
+        precondition(!pacing.needsRefresh(at: 24, pendingWrites: 0, legacy: false))
+        precondition(!pacing.needsRefresh(at: 26, pendingWrites: 1, legacy: false))
+        precondition(pacing.needsRefresh(at: 26, pendingWrites: 0, legacy: false))
+        precondition(pacing.needsRefresh(at: 23, pendingWrites: 0, legacy: true))
+        precondition(frame(false, pending: 1, bytes: 600 * 1024) == .send, "A large IDR can be followed by a P-frame")
+        precondition(frame(true, pending: 2, bytes: 600 * 1024) == .startDraining)
+        precondition(frame(true, pending: 1) == .skip)
+        print("PASS: CarLife bounds pending writes at 30 FPS, requests one IDR after drain, and resumes with a complete reference chain")
     }
 }

@@ -2,7 +2,7 @@ import UIKit
 import Photos
 import WebKit
 
-final class LogFeedbackViewController: UIViewController, WKNavigationDelegate {
+final class LogFeedbackViewController: UIViewController, WKNavigationDelegate, WKUIDelegate {
     private static let formURL = URL(string: "https://logport.fireflyz.cc/")!
     private let webView = WKWebView()
 
@@ -12,6 +12,7 @@ final class LogFeedbackViewController: UIViewController, WKNavigationDelegate {
         super.viewDidLoad()
         title = CWL("日志反馈")
         webView.navigationDelegate = self
+        webView.uiDelegate = self
         loadForm()
     }
 
@@ -34,6 +35,16 @@ final class LogFeedbackViewController: UIViewController, WKNavigationDelegate {
         navigationItem.prompt = error.localizedDescription
         navigationItem.rightBarButtonItem = UIBarButtonItem(title: CWL("重试"), style: .plain,
                                                            target: self, action: #selector(loadForm))
+    }
+
+    // Logport asks before a selected file replaces text already entered in its form.
+    func webView(_ webView: WKWebView, runJavaScriptConfirmPanelWithMessage message: String,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (Bool) -> Void) {
+        guard viewIfLoaded?.window != nil, presentedViewController == nil else { completionHandler(false); return }
+        let alert = UIAlertController(title: CWL("日志反馈"), message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: CWL("取消"), style: .cancel) { _ in completionHandler(false) })
+        alert.addAction(UIAlertAction(title: CWL("好"), style: .default) { _ in completionHandler(true) })
+        present(alert, animated: true)
     }
 }
 

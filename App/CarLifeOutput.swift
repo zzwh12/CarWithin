@@ -71,8 +71,8 @@ final class CarLifeOutput {
         }
     }
 
-    func append(_ accessUnit: Data, codec: VideoCodec) {
-        queue.async { [weak self] in self?.appendOnQueue(accessUnit, codec: codec) }
+    func append(_ units: [Data], codec: VideoCodec, keyframe: Bool) {
+        queue.async { [weak self] in self?.appendOnQueue(units, codec: codec, keyframe: keyframe) }
     }
 
     func stop() { queue.async { [weak self] in self?.stopOnQueue() } }
@@ -174,18 +174,15 @@ final class CarLifeOutput {
 
     // MARK: Video
 
-    private func appendOnQueue(_ accessUnit: Data, codec: VideoCodec) {
+    private func appendOnQueue(_ units: [Data], codec: VideoCodec, keyframe: Bool) {
         guard running else { return }
         guard codec == .h264 else {
             if !warnedCodec { warnedCodec = true; log(CWL("CarLife 只支持 H.264，当前 CarPlay 输出 {1}，已忽略画面", [String(describing: codec.displayName)])) }
             return
         }
-        guard let units = try? AnnexB.units(in: accessUnit) else { return }
         var picture: [Data] = []
-        var keyframe = false
         for unit in units {
             if codec.parameterSet(unit) != nil { _ = parameters.absorb(unit); continue }
-            if codec.isRandomAccess(unit) { keyframe = true }
             picture.append(unit)
         }
         guard !picture.isEmpty, let session, parameters.isComplete else { return }
@@ -353,22 +350,65 @@ private final class Link {
     let connection: NWConnection
     let channel: Int
     var buffer = Data()
-    var pendingBytes = 0
+    private(set) var pendingBytes = 0
+    private(set) var pendingWrites = 0
+    var onDrained: (() -> Void)?
     /// Last time a write completed (or the first write started); detects stalled sockets.
     var progressAt = DispatchTime.now()
     init(connection: NWConnection, channel: Int) { self.connection = connection; self.channel = channel }
 
     func write(_ data: Data) {
         if pendingBytes == 0 { progressAt = .now() }
-        pendingBytes += data.count
+        let byteCount = data.count
+        pendingBytes += byteCount
+        pendingWrites += 1
         connection.send(content: data, completion: .contentProcessed { [weak self] error in
             guard let self else { return }
-            self.pendingBytes = max(0, self.pendingBytes - data.count)
+            self.pendingBytes -= byteCount
+            self.pendingWrites -= 1
             self.progressAt = .now()
-            if error != nil { self.connection.cancel() }
+            if error != nil { self.onDrained = nil; self.connection.cancel(); return }
+            if self.pendingWrites == 0 { self.onDrained?() }
         })
     }
     var stalled: Bool { pendingBytes > 0 && DispatchTime.now().uptimeNanoseconds - progressAt.uptimeNanoseconds > 4_000_000_000 }
+}
+
+/// Gate complete H.264 access units before giving them to TCP, where they can no longer be dropped.
+struct CarLifeVideoPacing {
+    enum Decision { case send, skip, startDraining }
+    private enum State { case waitingForIDR, streaming, draining }
+    private var state: State = .waitingForIDR
+    private var lastRefresh = -Double.infinity
+
+    mutating func admit(keyframe: Bool, pendingWrites: Int, pendingBytes: Int, fps: Int) -> Decision {
+        guard state != .draining else { return .skip }
+        if state == .waitingForIDR && !keyframe { return .skip }
+        // About 125 ms of frames (four at 30 FPS). A single large IDR may have a follower.
+        let bytePressure = pendingBytes >= 512 * 1024 && (pendingWrites > 1 || keyframe)
+        if pendingWrites >= max(3, (fps + 7) / 8) || bytePressure {
+            state = .draining
+            return .startDraining
+        }
+        return .send
+    }
+
+    mutating func sentKeyframe(at now: TimeInterval) {
+        state = .streaming
+        lastRefresh = now
+    }
+
+    mutating func drained() -> Bool {
+        guard state == .draining else { return false }
+        state = .waitingForIDR
+        return true
+    }
+
+    mutating func requestedKeyframe(at now: TimeInterval) { lastRefresh = now }
+
+    func needsRefresh(at now: TimeInterval, pendingWrites: Int, legacy: Bool) -> Bool {
+        state != .draining && pendingWrites == 0 && now - lastRefresh >= (legacy ? 1.5 : 4)
+    }
 }
 
 // MARK: - Framing
@@ -601,16 +641,15 @@ private final class Session {
     private var fps: Int
     private var encoderChannel = 1
     private var lastSent = DispatchTime.now()
-    private var lastKeyframeRequest = DispatchTime(uptimeNanoseconds: 0)
     private let createdAt = DispatchTime.now()
     private var framesSent = 0
-    private var waitingForKeyframe = true
+    private var videoPacing = CarLifeVideoPacing()
     private var parameterSetsSent = false
     private var skips = 0
     /// Held fingers in the order they went down; pointer-up indexes refer to this order.
     private var touches: [TouchPoint] = []
-    /// Above this backlog on the video socket, frames are skipped to the next keyframe.
-    private let skipPendingBytes = 1024 * 1024
+    private var windowStarted = ProcessInfo.processInfo.systemUptime
+    private var windowFrames = 0, windowSkips = 0, peakWrites = 0, peakBytes = 0
 
     var log: ((String) -> Void)?
     var onState: ((String) -> Void)?
@@ -624,6 +663,17 @@ private final class Session {
 
     func attach(_ link: Link) {
         channels.updateValue(link, forKey: link.channel)?.connection.cancel()
+        if link.channel == 2 {
+            link.onDrained = { [weak self, weak link] in
+                guard let self, let link, self.active, self.streaming, self.owns(link), self.videoPacing.drained() else { return }
+                self.requestKeyframe(CWL("网络积压"))
+            }
+            if streaming {
+                videoPacing = CarLifeVideoPacing()
+                parameterSetsSent = false
+                requestKeyframe(CWL("车机请求画面"))
+            }
+        }
         if link.channel == 1 { log?(CWL("车机 {1} 已连接", [String(describing: peer)])) }
     }
     func owns(_ link: Link) -> Bool { channels[link.channel] === link }
@@ -699,7 +749,9 @@ private final class Session {
             send(encoderChannel, 65544, CarLifeProtoWriter().number(1, Int64(width)).number(2, Int64(height)).number(3, Int64(fps)).data)
         case 98313:
             try require(authenticated, "unexpected_phase")
-            streaming = true; waitingForKeyframe = true
+            streaming = true
+            videoPacing = CarLifeVideoPacing()
+            resetWindow(at: ProcessInfo.processInfo.systemUptime)
             onState?(CWL("CarLife：车机已请求画面，正在等待关键帧"))
             requestKeyframe(CWL("车机请求画面"))
         case 98314:
@@ -737,18 +789,22 @@ private final class Session {
 
     func video(picture: [Data], keyframe: Bool, parameterSets: [Data]) {
         guard active, authenticated, streaming, let videoLink = channels[2], let profile else { return }
-        if waitingForKeyframe {
-            guard keyframe else { return }
-            waitingForKeyframe = false
-        } else if !keyframe, videoLink.pendingBytes > skipPendingBytes {
-            // Never drop a single dependent frame: skip the rest of this GOP and ask for an IDR.
-            waitingForKeyframe = true; skips += 1
+        switch videoPacing.admit(keyframe: keyframe, pendingWrites: videoLink.pendingWrites,
+                                 pendingBytes: videoLink.pendingBytes, fps: fps) {
+        case .send: break
+        case .skip: return
+        case .startDraining:
+            skips += 1
             if skips == 1 || skips % 10 == 0 { log?(CWL("车机网络跟不上，跳到下一个关键帧（第 {1} 次）", [String(describing: skips)])) }
-            requestKeyframe(CWL("网络积压"))
             return
         }
         func annexB(_ units: [Data]) -> Data {
-            units.reduce(into: Data()) { $0.append(contentsOf: [0, 0, 0, 1]); $0.append($1) }
+            var data = Data(capacity: units.reduce(0) { $0 + 4 + $1.count })
+            for unit in units {
+                data.append(contentsOf: [0, 0, 0, 1])
+                data.append(unit)
+            }
+            return data
         }
         var units = picture
         if keyframe {
@@ -761,25 +817,52 @@ private final class Session {
                 let idr = Array(picture.drop { VideoCodec.h264.nalType($0) != 5 })
                 if !idr.isEmpty {
                     units = (parameterSetsSent ? [] : parameterSets) + idr
-                    parameterSetsSent = true
                 }
             }
         }
-        guard send(2, 131073, annexB(units)) else { return }
+        guard send(2, 131073, annexB(units)) else {
+            videoPacing = CarLifeVideoPacing()
+            requestKeyframe(CWL("车机请求画面"))
+            return
+        }
+        if keyframe {
+            parameterSetsSent = true
+            videoPacing.sentKeyframe(at: ProcessInfo.processInfo.systemUptime)
+        }
+        peakWrites = max(peakWrites, videoLink.pendingWrites)
+        peakBytes = max(peakBytes, videoLink.pendingBytes)
         framesSent += 1
         if framesSent == 1 { onState?(CWL("CarLife：正在向车机 {1} 发送 CarPlay 画面", [String(describing: peer)])) }
     }
 
     func tick() {
-        guard active, profile != nil else { return }
+        guard active, let profile else { return }
         let now = DispatchTime.now().uptimeNanoseconds
-        if now - lastSent.uptimeNanoseconds > 1_000_000_000 { send(channels[2] != nil ? 2 : 1, 131074) }
-        // Some head units only recover from decoder resets at a keyframe; keep them regular.
-        if streaming, now - lastKeyframeRequest.uptimeNanoseconds >= 1_500_000_000 { requestKeyframe(nil) }
+        let uptime = ProcessInfo.processInfo.systemUptime
+        if streaming, let videoLink = channels[2],
+           videoPacing.needsRefresh(at: uptime, pendingWrites: videoLink.pendingWrites, legacy: profile == .legacy) {
+            requestKeyframe(nil)
+        }
+        if now - lastSent.uptimeNanoseconds > 1_000_000_000, let link = channels[2] ?? channels[1], link.pendingWrites == 0 {
+            send(link.channel, 131074)
+        }
+        guard streaming, channels[2] != nil else { return }
+        let duration = uptime - windowStarted
+        if duration >= 5 {
+            log?(String(format: CWL("视频提交 %.1f FPS · 待写峰值 %d 包 / %.0f KiB · 积压 %d 次"),
+                Double(framesSent - windowFrames) / duration, peakWrites, Double(peakBytes) / 1024, skips - windowSkips))
+            resetWindow(at: uptime)
+        }
+    }
+
+    private func resetWindow(at now: TimeInterval) {
+        windowStarted = now
+        windowFrames = framesSent; windowSkips = skips
+        peakWrites = 0; peakBytes = 0
     }
 
     private func requestKeyframe(_ reason: String?) {
-        lastKeyframeRequest = .now()
+        videoPacing.requestedKeyframe(at: ProcessInfo.processInfo.systemUptime)
         onKeyframeRequest?(reason ?? CWL("定期刷新"))
     }
 

@@ -80,7 +80,7 @@ CarPlay 运行中部分连接设置会锁定，停止后再修改。CarPlay 外�
 
 ## 其他输出方式
 
-- **无线 CarLife。** 适用于兼容无线 CarLife 的车机。让车机与 iPhone 连到同一 Wi-Fi，在 CarWithin 选择 CarLife，再打开车机上的 CarLife，最后启动本机 CarPlay。车机 IP 可手动填写，留空时自动发现。画面与触控走 CarLife，声音可以走车机蓝牙。输出最高为 H.264、1080p、30 FPS。
+- **无线 CarLife。** 适用于兼容无线 CarLife 的车机。让车机与 iPhone 连到同一 Wi-Fi，在 CarWithin 选择 CarLife，再打开车机上的 CarLife，最后启动本机 CarPlay。车机 IP 可手动填写，留空时自动发现。画面与触控走 CarLife，声音可以走车机蓝牙。输出最高为 H.264、1080p、30 FPS。滑动时若画面滞后，可在诊断日志中查看「CarLife 视频提交」一行，里面记录了最近约 5 秒的提交帧率、待写队列峰值和积压次数。
 - **AirPlay（实验）。** 在输出方式选择 AirPlay，启动 CarPlay 并等待画面就绪。在主界面连接卡片点 AirPlay 图标，选取同一网络中的视频接收器。AirPlay 画面有缓冲，触控仍在 iPhone 上完成，声音沿用 iPhone 或车机蓝牙。
 
 ### 亿连直连（实验）

@@ -8007,6 +8007,23 @@
         }
       }
     },
+    "视频提交 %.1f FPS · 待写峰值 %d 包 / %.0f KiB · 积压 %d 次": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Video queued %.1f FPS · peak pending %d packets / %.0f KiB · congestion events %d"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "视频提交 %.1f FPS · 待写峰值 %d 包 / %.0f KiB · 积压 %d 次"
+          }
+        }
+      }
+    },
     "定期刷新": {
       "extractionState": "manual",
       "localizations": {

@@ -28,6 +28,7 @@ jobs:
         run: |
           swift test --filter AccessoryMessagesTests
           python3 Tools/verify_legacy62.py
+          bash Tools/test_carlife_discovery.sh
           bash Tools/test_zeeho_control.sh
           bash Tools/test_zeeho_seplus.sh
           bash Tools/test_tailing.sh
