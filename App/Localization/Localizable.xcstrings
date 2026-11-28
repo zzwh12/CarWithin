@@ -18689,6 +18689,40 @@
         }
       }
     },
+    "亿连实际发送 %.1f FPS · 新源帧 %.1f FPS · 源解码 %.1f FPS · 视频 %.2f Mbit/s · 最长帧间隔 %.0f ms · 拉帧/备帧/写入最长 %.0f/%.0f/%.0f ms": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carbit sent %.1f FPS · fresh source frames %.1f FPS · source decoded %.1f FPS · video %.2f Mbit/s · longest send gap %.0f ms · max pull/preparation/write %.0f/%.0f/%.0f ms"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "亿连实际发送 %.1f FPS · 新源帧 %.1f FPS · 源解码 %.1f FPS · 视频 %.2f Mbit/s · 最长帧间隔 %.0f ms · 拉帧/备帧/写入最长 %.0f/%.0f/%.0f ms"
+          }
+        }
+      }
+    },
+    "亿连视频解码 · {1}": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Carbit video decoder · {1}"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "亿连视频解码 · {1}"
+          }
+        }
+      }
+    },
     "亿连像素抽样 · 输入峰值 {1}/255 · 编码前峰值 {2}/255 · 内容区 {3} · 源已解码 {4} 帧": {
       "extractionState": "manual",
       "localizations": {

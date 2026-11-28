@@ -64,6 +64,7 @@ final class PXCH264Output {
 
     private final class Session: @unchecked Sendable {
         let queue: DispatchQueue
+        private let decodeQueue: DispatchQueue
         let onState: (String) -> Void
         let onLog: (String) -> Void
         let onPreview: ((CMSampleBuffer) -> Void)?
@@ -101,10 +102,17 @@ final class PXCH264Output {
         private var encoderSize: InstrumentFrameSize?
         private var parameters = VideoParameterSets(codec: .h264)
         private var waitingForIDR = true
-        private var latest: CVPixelBuffer?
-        private var decodedPictures: UInt64 = 0
+        // Publish the image and its sequence together. A pull holds one immutable picture
+        // while the decoder continues receiving CarPlay frames on its own queue.
+        private struct Picture {
+            let image: CVPixelBuffer
+            let sequence: UInt64
+        }
+        private var latest: Picture?
+        private var allowHardwareDecoding: Bool
         // iOS can deny GPU submissions when the projection app is in the background.
         private let compositor = CIContext(options: [.useSoftwareRenderer: true, .cacheIntermediates: false])
+        private var cachedFit: (source: CVPixelBuffer, size: InstrumentFrameSize, buffer: CVPixelBuffer)?
         private var cachedJPEG: (source: CVPixelBuffer, size: InstrumentFrameSize, data: Data)?
         // The pull worker owns this timer and buffer. The UI only sets testRequested under lock.
         private var testUntil = -Double.infinity
@@ -112,7 +120,8 @@ final class PXCH264Output {
         private let origin = ProcessInfo.processInfo.systemUptime
         private var lastFrame = -Double.infinity
         private var lastKeyframe = -Double.infinity
-        private var lastCodecFailure = -Double.infinity
+        private var lastDecodeFailure = -Double.infinity
+        private var lastEncodeFailure = -Double.infinity
         private var lastPixelSample = -Double.infinity
         private var nextHeartbeat = 0.0
         private var counter: UInt32 = 0
@@ -126,6 +135,9 @@ final class PXCH264Output {
              requestKeyframe: @escaping () -> Void) {
             self.queue = queue
             self.profile = connection.profile
+            self.decodeQueue = connection.profile == .carbit
+                ? DispatchQueue(label: "CarWithin.carbit.decode", qos: .userInitiated) : queue
+            self.allowHardwareDecoding = connection.profile == .carbit
             self.frameRate = frameRate
             self.sourceSize = sourceSize
             self.usesRelay = connection.profile == .zeehoSEPlus && videoMode.effective(for: frameRate) == .relay
@@ -160,7 +172,9 @@ final class PXCH264Output {
                         var first = true
                         var wasTesting = false
                         var waitingForSource = false
+                        var delivery = CarbitDeliveryStatistics()
                         var nextFrame = ProcessInfo.processInfo.systemUptime
+                        let frameInterval = 1.0 / Double(frameRate.rawValue)
                         while active {
                             try connection.checkHealth()
                             if profile != .carbit && !queue.sync(execute: { latest != nil }) {
@@ -169,12 +183,13 @@ final class PXCH264Output {
                             }
                             let remaining = nextFrame - ProcessInfo.processInfo.systemUptime
                             if remaining > 0 { Thread.sleep(forTimeInterval: min(remaining, 0.04)); continue }
+                            let pullStarted = ProcessInfo.processInfo.systemUptime
                             let (size, format) = try connection.waitForFrameRequest()
                             let now = ProcessInfo.processInfo.systemUptime
-                            nextFrame = now + 1.0 / Double(frameRate.rawValue)
+                            nextFrame = now + frameInterval
                             guard active else { break }
                             let pattern = profile == .carbit ? try testImageForPull(size: size, at: now) : nil
-                            guard let image = pattern ?? queue.sync(execute: { latest }) else {
+                            guard var picture = pattern.map({ Picture(image: $0, sequence: 0) }) ?? lock.withLock({ latest }) else {
                                 guard profile == .carbit else { continue }
                                 try connection.sendEmptyCarbitFrame()
                                 if !waitingForSource {
@@ -190,25 +205,37 @@ final class PXCH264Output {
                             let testing = pattern != nil
                             let frame: Data
                             if format == .jpeg {
-                                frame = try queue.sync { try jpeg(image, size: size) }
+                                frame = try queue.sync { try jpeg(picture.image, size: size) }
                             } else {
                                 var result = queue.sync {
-                                    encode(image, size: size, at: now, forceKeyframe: first || testing != wasTesting)
+                                    encode(picture.image, size: size, at: now, forceKeyframe: first || testing != wasTesting)
                                 }
                                 // A retry still answers the same pull. Keep test pictures separate from live frames.
-                                for _ in 0..<20 {
-                                    guard result == nil && active else { break }
-                                    Thread.sleep(forTimeInterval: 0.05)
+                                let retryUntil = ProcessInfo.processInfo.systemUptime + 1
+                                while result == nil && active && ProcessInfo.processInfo.systemUptime < retryUntil {
+                                    Thread.sleep(forTimeInterval: profile == .carbit ? frameInterval : 0.05)
+                                    guard active else { break }
                                     result = queue.sync {
-                                        encode(pattern ?? latest ?? image, size: size,
-                                               at: ProcessInfo.processInfo.systemUptime, forceKeyframe: true)
+                                        if !testing, let current = lock.withLock({ latest }) { picture = current }
+                                        return encode(picture.image, size: size, at: ProcessInfo.processInfo.systemUptime,
+                                                      forceKeyframe: true)
                                     }
                                 }
                                 guard active else { break }
                                 guard let result else { throw TailingError.timeout(CWL("等待 H.264 编码画面")) }
                                 frame = result.data
                             }
+                            let writeStarted = ProcessInfo.processInfo.systemUptime
                             try connection.sendFrame(frame, format: format)
+                            if profile == .carbit {
+                                if testing {
+                                    delivery = CarbitDeliveryStatistics()
+                                } else if let summary = delivery.record(source: picture.sequence, bytes: frame.count,
+                                    pullStarted: pullStarted, received: now, writeStarted: writeStarted,
+                                    sent: ProcessInfo.processInfo.systemUptime) {
+                                    onLog(summary.logLine)
+                                }
+                            }
                             first = format == .jpeg
                             if testing && !wasTesting {
                                 onLog(CWL("亿连测试色条已发送 · {1} · {2}", [size.description, format.name]))
@@ -305,7 +332,7 @@ final class PXCH264Output {
             }
             if needsKeyframe { requestKeyframe() }
             guard accepted else { return }
-            queue.async { [self] in
+            decodeQueue.async { [self] in
                 defer { lock.withLock { queued -= 1 } }
                 guard lock.withLock({ !cancelled && acceptingFrames }) else { return }
                 decode(data, keyframe: keyframe)
@@ -411,12 +438,13 @@ final class PXCH264Output {
                 if waitingForIDR {
                     // Throttle rebuilds while VideoToolbox is unavailable during a lock transition.
                     guard parameters.isComplete, keyframe, !picture.isEmpty else { return }
-                    guard ProcessInfo.processInfo.systemUptime - lastCodecFailure >= 0.5 else {
+                    guard ProcessInfo.processInfo.systemUptime - lastDecodeFailure >= 0.5 else {
                         requestKeyframe()
                         return
                     }
                     decoder?.invalidate()
                     decoder = try TailingH264Decoder(configuration: parameters.decoderConfigurationRecord(),
+                        allowHardwareAcceleration: allowHardwareDecoding,
                         output: { [weak self] image in
                             guard let self else { return }
                             self.lock.withLock { self.decoded = image }
@@ -424,6 +452,9 @@ final class PXCH264Output {
                             guard let self else { return }
                             self.lock.withLock { self.decodeError = error }
                         })
+                    if profile == .carbit, let decoder {
+                        onLog(CWL("亿连视频解码 · {1}", [decoder.backendDescription]))
+                    }
                     waitingForIDR = false
                 }
                 guard let decoder, !picture.isEmpty else { return }
@@ -436,7 +467,7 @@ final class PXCH264Output {
                 }
                 if let error { throw error }
                 if let image {
-                    latest = image; decodedPictures &+= 1
+                    lock.withLock { latest = Picture(image: image, sequence: (latest?.sequence ?? 0) &+ 1) }
                     publishPreview(image)
                 }
             } catch {
@@ -444,7 +475,10 @@ final class PXCH264Output {
                 decoder = nil
                 lock.withLock { decoded = nil; decodeError = nil }
                 waitingForIDR = true
-                logCodecFailure(CWL("解码"), error)
+                if let failure = error as? TailingH264DecoderError, failure.canRetryWithSoftware {
+                    allowHardwareDecoding = false
+                }
+                logCodecFailure(CWL("解码"), error, lastFailure: &lastDecodeFailure)
                 requestKeyframe()
             }
         }
@@ -488,7 +522,7 @@ final class PXCH264Output {
                     encoderSize = size
                 }
                 if encoder == nil {
-                    guard now - lastCodecFailure >= 0.5 else { return nil }
+                    guard now - lastEncodeFailure >= 0.5 else { return nil }
                     encoder = try H264Encoder(width: size.width, height: size.height,
                                               fps: frameRate.rawValue, bitrate: bitrate(for: size)) { [weak self] result in
                         guard let self else { return }
@@ -497,7 +531,8 @@ final class PXCH264Output {
                     lastKeyframe = -.infinity
                 }
                 guard let encoder else { return nil }
-                try encoder.encode(try fittedImage(image, to: size), presentationTime: CMTime(seconds: now, preferredTimescale: 1_000_000),
+                let fitted = try fittedImage(image, to: size, pool: profile == .carbit ? encoder.pixelBufferPool : nil)
+                try encoder.encode(fitted, presentationTime: CMTime(seconds: now, preferredTimescale: 1_000_000),
                                    forceKeyframe: forceKeyframe || lastKeyframe == -.infinity)
                 encoder.complete()
                 let result = lock.withLock {
@@ -514,23 +549,34 @@ final class PXCH264Output {
                 encoder = nil
                 lastKeyframe = -.infinity
                 lock.withLock { encoded = nil }
-                logCodecFailure(CWL("编码"), error)
+                logCodecFailure(CWL("编码"), error, lastFailure: &lastEncodeFailure)
                 return nil
             }
         }
 
-        private func fittedImage(_ image: CVPixelBuffer, to size: InstrumentFrameSize) throws -> CVPixelBuffer {
+        private func fittedImage(_ image: CVPixelBuffer, to size: InstrumentFrameSize,
+                                 pool: CVPixelBufferPool? = nil) throws -> CVPixelBuffer {
             let width = size.width, height = size.height
             if CVPixelBufferGetWidth(image) == width, CVPixelBufferGetHeight(image) == height {
+                cachedFit = nil
                 sampleCarbitPixels(source: image, fitted: image, content: CGRect(x: 0, y: 0, width: width, height: height))
                 return image
             }
-            var buffer: CVPixelBuffer?
-            let status = CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA,
-                                             [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer)
-            guard status == kCVReturnSuccess, let buffer else { throw ConfigurationError(CWL("无法分配缩放画面（{1}）", [String(status)])) }
             let source = CIImage(cvPixelBuffer: image)
             let destination = size.fittedRect(for: source.extent.size)
+            if let cachedFit, cachedFit.source === image && cachedFit.size == size {
+                sampleCarbitPixels(source: image, fitted: cachedFit.buffer, content: destination)
+                return cachedFit.buffer
+            }
+            cachedFit = nil
+            var buffer: CVPixelBuffer?
+            var status = kCVReturnAllocationFailed
+            if let pool { status = CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer) }
+            if buffer == nil {
+                status = CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA,
+                    [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer)
+            }
+            guard status == kCVReturnSuccess, let buffer else { throw ConfigurationError(CWL("无法分配缩放画面（{1}）", [String(status)])) }
             let scale = destination.width / source.extent.width
             let scaled = source.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
             let positioned = scaled.transformed(by: CGAffineTransform(
@@ -539,6 +585,7 @@ final class PXCH264Output {
             let bounds = CGRect(x: 0, y: 0, width: width, height: height)
             compositor.render(positioned.composited(over: CIImage(color: .black)).cropped(to: bounds),
                               to: buffer, bounds: bounds, colorSpace: CGColorSpaceCreateDeviceRGB())
+            if profile == .carbit { cachedFit = (image, size, buffer) }
             sampleCarbitPixels(source: image, fitted: buffer, content: destination)
             return buffer
         }
@@ -571,7 +618,7 @@ final class PXCH264Output {
                   let output = (source === fitted ? input : peak(fitted, in: content)) else { return }
             let area = InstrumentFrameSize(width: Int(content.width.rounded()), height: Int(content.height.rounded()))
             onLog(CWL("亿连像素抽样 · 输入峰值 {1}/255 · 编码前峰值 {2}/255 · 内容区 {3} · 源已解码 {4} 帧",
-                      [String(input), String(output), area.description, String(decodedPictures)]))
+                      [String(input), String(output), area.description, String(lock.withLock { latest?.sequence ?? 0 })]))
         }
 
         private func jpeg(_ image: CVPixelBuffer, size: InstrumentFrameSize) throws -> Data {
@@ -593,6 +640,12 @@ final class PXCH264Output {
                     let bitrate = String(format: "%.1f", Double(bitrate(for: size)) / 1_000_000)
                     onLog("\(profile.name)首帧已发送 · \(size) · 兼容转码 · 目标 \(frameRate.rawValue) FPS · 码率 \(bitrate) Mbit/s")
                 }
+            }
+            if profile == .carbit {
+                let state = testing ? CWL("正在发送测试色条 · {1} · {2}", [size.description, format.name])
+                    : CWL("正在发送 · {1} · {2}", [size.description, format.name])
+                report(state)
+                return
             }
             if let started = lastReply {
                 counter &+= 1
@@ -619,19 +672,13 @@ final class PXCH264Output {
                 relayCondition.lock(); relayInputFrames = 0; relayCondition.unlock()
                 relayPullTime = 0; relayWriteTime = 0
             }
-            if profile == .carbit {
-                let state = testing ? CWL("正在发送测试色条 · {1} · {2}", [size.description, format.name])
-                    : CWL("正在发送 · {1} · {2}", [size.description, format.name])
-                report(state)
-                return
-            }
             report("正在投屏 · \(size) · H.264 · 目标 \(frameRate.rawValue) FPS")
         }
 
-        private func logCodecFailure(_ stage: String, _ error: Error) {
+        private func logCodecFailure(_ stage: String, _ error: Error, lastFailure: inout TimeInterval) {
             let now = ProcessInfo.processInfo.systemUptime
-            if now - lastCodecFailure > 4 { onLog(CWL("{1}{2}恢复：{3}", [profile.name, stage, error.localizedDescription])) }
-            lastCodecFailure = now
+            if now - lastFailure > 4 { onLog(CWL("{1}{2}恢复：{3}", [profile.name, stage, error.localizedDescription])) }
+            lastFailure = now
         }
 
         private func report(_ message: String) {
@@ -651,15 +698,64 @@ final class PXCH264Output {
         }
 
         func close() {
-            lock.withLock { acceptingFrames = false }
+            let needsClose = lock.withLock {
+                defer { acceptingFrames = false }
+                return acceptingFrames
+            }
+            guard needsClose else { return }
             connection.close()
-            decoder?.invalidate()
-            decoder = nil
+            decodeQueue.async { [self] in
+                decoder?.invalidate()
+                decoder = nil
+                lock.withLock { latest = nil }
+            }
             encoder?.invalidate()
             encoder = nil
-            latest = nil
+            cachedFit = nil
             cachedJPEG = nil
             relayCondition.lock(); relayBuffer.reset(); relayCondition.broadcast(); relayCondition.unlock()
         }
+    }
+}
+
+/// Counts completed live replies between two send timestamps. The preceding source and
+/// send timestamp survive each report so a repeated frame or a stall at the boundary counts.
+struct CarbitDeliveryStatistics {
+    struct Window {
+        var duration = 0.0
+        var sentFrames = 0, freshFrames = 0, bytes = 0
+        var decodedFrames: UInt64 = 0
+        var longestGap = 0.0, longestPull = 0.0, longestPreparation = 0.0, longestWrite = 0.0
+
+        var logLine: String {
+            String(format: CWL("亿连实际发送 %.1f FPS · 新源帧 %.1f FPS · 源解码 %.1f FPS · 视频 %.2f Mbit/s · 最长帧间隔 %.0f ms · 拉帧/备帧/写入最长 %.0f/%.0f/%.0f ms"),
+                Double(sentFrames) / duration, Double(freshFrames) / duration, Double(decodedFrames) / duration,
+                Double(bytes) * 8 / duration / 1_000_000, longestGap * 1000,
+                longestPull * 1000, longestPreparation * 1000, longestWrite * 1000)
+        }
+    }
+
+    private var started: TimeInterval?
+    private var lastSent = 0.0
+    private var lastSource: UInt64 = 0
+    private var window = Window()
+
+    mutating func record(source: UInt64, bytes: Int, pullStarted: TimeInterval, received: TimeInterval,
+                         writeStarted: TimeInterval, sent: TimeInterval) -> Window? {
+        defer { lastSource = source; lastSent = sent }
+        guard let started else { self.started = sent; return nil }
+        window.duration = sent - started
+        window.sentFrames += 1
+        if source != lastSource { window.freshFrames += 1 }
+        window.decodedFrames &+= source &- lastSource
+        window.bytes += bytes
+        window.longestGap = max(window.longestGap, sent - lastSent)
+        window.longestPull = max(window.longestPull, received - pullStarted)
+        window.longestPreparation = max(window.longestPreparation, writeStarted - received)
+        window.longestWrite = max(window.longestWrite, sent - writeStarted)
+        guard window.duration >= 5 else { return nil }
+        self.started = sent
+        defer { window = Window() }
+        return window
     }
 }

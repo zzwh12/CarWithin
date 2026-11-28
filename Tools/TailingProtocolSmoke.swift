@@ -34,6 +34,7 @@ private final class Box<Value>: @unchecked Sendable {
 struct TailingTests {
     static func main() throws {
         #if TAILING_MEDIA_SMOKE
+        try verifyCarbitDeliveryStatistics()
         try verifyCarbitPreviewSample()
         try verifyCarbitCroppedSPS()
         try tailingJPEGSizeSmoke()
@@ -245,7 +246,7 @@ struct TailingTests {
         let stubH264 = Data([0, 0, 0, 1, 0x65, 1, 2, 3])
         #if TAILING_MEDIA_SMOKE
         let requestTestPicture = Box<(() -> Void)?>(nil)
-        let startLivePicture = Box<(() -> Void)?>(nil)
+        let livePicture = Box<((Bool) -> Void)?>(nil)
         let keyframeRequested = Box(false)
         #endif
         DispatchQueue.global().async {
@@ -391,7 +392,7 @@ struct TailingTests {
                                    "CarPlay 首帧到来前，每个拉帧请求应收到一个空帧")
                     }
                     try expect(keyframeRequested.get(), "收到首个空帧请求后应请求源关键帧")
-                    guard let showTest = requestTestPicture.get(), let showLive = startLivePicture.get() else {
+                    guard let showTest = requestTestPicture.get(), let showLive = livePicture.get() else {
                         throw TestError.failed("缺少亿连输出会话")
                     }
                     showTest()
@@ -410,7 +411,7 @@ struct TailingTests {
                         if format == .jpeg { try verifyJPEGTestBars(frame, size: pictureSize, greenCenter: true) }
                         else { try verifyH264TestBars(frame, size: pictureSize, greenCenter: true) }
                     }
-                    showLive()
+                    showLive(false)
                     // Some receivers pause their pulls; the next picture must be the live source.
                     Thread.sleep(forTimeInterval: 5.5)
                     print("PASS: Carbit answered two early pulls and displayed RGB bars in \(testFormats.map(\.name)) without a CarPlay frame")
@@ -436,8 +437,11 @@ struct TailingTests {
                     let frame = try video.readExactly(length)
                     #if TAILING_MEDIA_SMOKE
                     if profile == .carbit {
-                        if format == .jpeg { try verifyJPEGTestBars(frame, size: size) }
-                        else { try verifyH264TestBars(frame, size: size, contentHeight: portraitCarbit ? 169 : nil) }
+                        if format == .jpeg {
+                            try verifyJPEGTestBars(frame, size: size)
+                            guard let change = livePicture.get() else { throw TestError.failed("缺少亿连测试视频源") }
+                            try verifyCarbitLiveUpdates(video, size: size, initial: frame, changeSource: change)
+                        } else { try verifyH264TestBars(frame, size: size, contentHeight: portraitCarbit ? 169 : nil) }
                         print("PASS: Carbit pull \(index + 1), decoded \(format.name) red/blue bars at \(size)")
                         continue
                     }
@@ -480,9 +484,10 @@ struct TailingTests {
         if profile == .carbit {
             let output = PXCH264Output()
             let bars = try makeH264TestBars(sourceSize)
+            let swapped = try makeH264TestBars(sourceSize, swapped: true)
             requestTestPicture.set(output.requestCarbitTestPicture)
-            startLivePicture.set { output.append(bars, codec: .h264, keyframe: true) }
-            output.start(connection: connection, sourceSize: sourceSize, onState: { _ in },
+            livePicture.set { output.append($0 ? swapped : bars, codec: .h264, keyframe: true) }
+            output.start(connection: connection, frameRate: .fps60, sourceSize: sourceSize, onState: { _ in },
                          requestKeyframe: { keyframeRequested.set(true) })
             stopOutput = output.stop
         }

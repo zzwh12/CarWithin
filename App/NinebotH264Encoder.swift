@@ -104,6 +104,11 @@ final class H264Encoder {
     private let callbackBox = H264CallbackBox()
     private let fps: Int
 
+    var pixelBufferPool: CVPixelBufferPool? {
+        guard let session else { return nil }
+        return VTCompressionSessionGetPixelBufferPool(session)
+    }
+
     init(width: Int, height: Int, fps: Int, bitrate: Int, profileLevel: CFString = kVTProfileLevel_H264_Baseline_AutoLevel,
          output: @escaping (Result<H264EncodedFrame, Error>) -> Void) throws {
         self.fps = fps

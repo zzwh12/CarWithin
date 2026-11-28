@@ -62,7 +62,29 @@ func verifyCarbitPreviewSample() throws {
     print("PASS: Carbit preview hands the decoded 1904×672 frame to the display layer unchanged")
 }
 
-func makeH264TestBars(_ size: InstrumentFrameSize) throws -> Data {
+func verifyCarbitDeliveryStatistics() throws {
+    var stats = CarbitDeliveryStatistics()
+    func reply(_ source: UInt64, at sent: TimeInterval) -> CarbitDeliveryStatistics.Window? {
+        stats.record(source: source, bytes: 10_000, pullStarted: sent - 0.010, received: sent - 0.007,
+                     writeStarted: sent - 0.002, sent: sent)
+    }
+    try require(reply(1, at: 1) == nil, "首帧建立测量基线")
+    for i in 1...266 {
+        try require(reply(UInt64(i / 2 * 2 + 1), at: 1 + Double(i) * 4.8 / 266) == nil, "提前结束了统计窗口")
+    }
+    guard let window = reply(267, at: 6) else { throw MediaSmokeError(message: "缺少传输统计") }
+    try require(window.sentFrames == 267 && window.freshFrames == 133 && window.decodedFrames == 266 &&
+                window.bytes == 2_670_000 && window.duration == 5, "重复或跳过的源帧应分别计数")
+    try require(abs(window.longestGap - 0.2) < 0.000001 && abs(window.longestPull - 0.003) < 0.000001 &&
+                abs(window.longestPreparation - 0.005) < 0.000001 && abs(window.longestWrite - 0.002) < 0.000001,
+                "发送间隔和各阶段耗时应独立测量")
+    guard let paused = reply(267, at: 11) else { throw MediaSmokeError(message: "没有记录跨窗口停顿") }
+    try require(paused.freshFrames == 0 && paused.sentFrames == 1 && paused.longestGap == 5,
+                "跨窗口发送旧画面应保留停顿和上一帧编号")
+    print("PASS: simulated Carbit timing window · \(window.logLine)")
+}
+
+func makeH264TestBars(_ size: InstrumentFrameSize, swapped: Bool = false) throws -> Data {
     let encoded = MediaBox<Result<H264EncodedFrame, Error>?>(nil)
     let encoder = try H264Encoder(width: size.width, height: size.height, fps: 25, bitrate: 4_000_000) {
         encoded.set($0)
@@ -78,10 +100,10 @@ func makeH264TestBars(_ size: InstrumentFrameSize) throws -> Data {
     for y in 0..<size.height {
         for x in 0..<size.width {
             let offset = y * stride + x * 4
-            let left = x < size.width / 2
-            base[offset] = left ? 0 : 255
+            let red = (x < size.width / 2) != swapped
+            base[offset] = red ? 0 : 255
             base[offset + 1] = 0
-            base[offset + 2] = left ? 255 : 0
+            base[offset + 2] = red ? 255 : 0
             base[offset + 3] = 255
         }
     }
@@ -166,7 +188,7 @@ func verifyH264TestBars(_ data: Data, size: InstrumentFrameSize, greenCenter: Bo
     }
 }
 
-func verifyJPEGTestBars(_ data: Data, size: InstrumentFrameSize, greenCenter: Bool = false) throws {
+func verifyJPEGTestBars(_ data: Data, size: InstrumentFrameSize, greenCenter: Bool = false, swapped: Bool = false) throws {
     guard data.starts(with: [0xff, 0xd8]), let source = CGImageSourceCreateWithData(data as CFData, nil),
           let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
         throw MediaSmokeError(message: "JPEG 不可解码")
@@ -184,9 +206,32 @@ func verifyJPEGTestBars(_ data: Data, size: InstrumentFrameSize, greenCenter: Bo
     let left = (size.height / 2 * size.width + size.width / 4) * 4
     let right = (size.height / 2 * size.width + size.width * 3 / 4) * 4
     let middle = (size.height / 2 * size.width + size.width / 2) * 4
-    try require(pixels[left] > 220 && pixels[left + 2] < 35 && pixels[right + 2] > 220 && pixels[right] < 35,
-                "JPEG 应解出左红右蓝的测试画面")
+    let red = swapped ? right : left, blue = swapped ? left : right
+    try require(pixels[red] > 220 && pixels[red + 2] < 35 && pixels[blue + 2] > 220 && pixels[blue] < 35,
+                "JPEG 应解出当前源帧的红蓝色条")
     try require(greenCenter ? pixels[middle + 1] > 200 : pixels[middle + 1] < 50, "JPEG 画面来源与当前模式应一致")
+}
+
+func verifyCarbitLiveUpdates(_ video: TailingSocket, size: InstrumentFrameSize, initial: Data,
+                            changeSource: (Bool) -> Void) throws {
+    func pull() throws -> Data {
+        try video.write(TailingProtocol.auxiliary(0x72))
+        let length = Int(try video.readExactly(4).uint32LE(0))
+        try require((1...8 * 1024 * 1024).contains(length), "每个拉帧请求都应得到一个有效视频帧")
+        return try video.readExactly(length)
+    }
+    var previous = initial
+    for swapped in [true, false] {
+        let repeated = try pull()
+        try require(repeated == previous, "静止画面应复用已生成的 JPEG")
+        changeSource(swapped)
+        let deadline = Date().addingTimeInterval(2)
+        var next = try pull()
+        while next == previous && Date() < deadline { next = try pull() }
+        try verifyJPEGTestBars(next, size: size, swapped: swapped)
+        previous = next
+    }
+    print("PASS: repeated Carbit pulls reused the static frame and displayed both live source changes")
 }
 
 /// Real VT H.264 → decoder → Core Image JPEG → pull-frame socket round trip on loopback.

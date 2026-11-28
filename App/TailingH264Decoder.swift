@@ -28,12 +28,13 @@ final class TailingH264Decoder {
 
     init(
         configuration: Data,
+        allowHardwareAcceleration: Bool = false,
         output: @escaping (CVPixelBuffer) -> Void,
         failure: @escaping (Error) -> Void
     ) throws {
         callbackBox.output = output
         callbackBox.failure = failure
-        try configure(configuration: configuration)
+        try configure(configuration: configuration, allowHardwareAcceleration: allowHardwareAcceleration)
     }
 
     deinit { invalidate() }
@@ -121,7 +122,7 @@ final class TailingH264Decoder {
         callbackBox.failure = nil
     }
 
-    private func configure(configuration: Data) throws {
+    private func configure(configuration: Data, allowHardwareAcceleration: Bool) throws {
         let parsed = try TailingAVCConfigurationRecord(data: configuration)
         nalUnitHeaderLength = parsed.nalUnitHeaderLength
         let retainedSets = parsed.parameterSets.map { $0 as NSData }
@@ -148,11 +149,11 @@ final class TailingH264Decoder {
             decompressionOutputCallback: tailingDecompressionCallback,
             decompressionOutputRefCon: Unmanaged.passUnretained(callbackBox).toOpaque()
         )
-        // iOS may invalidate a hardware decoder when the phone locks. This low-resolution
-        // secondary output uses the system software decoder where the public switch exists.
+        // Low-resolution instruments prefer software for lock-screen use. Carbit can
+        // decode HD sources at 60 FPS, and its session can retry in software on lock.
         var specification: CFDictionary?
         if #available(iOS 17.0, macOS 10.9, *) {
-            specification = [kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: false] as CFDictionary
+            specification = [kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: allowHardwareAcceleration] as CFDictionary
         }
         var created: VTDecompressionSession?
         let sessionStatus = VTDecompressionSessionCreate(
@@ -171,7 +172,7 @@ final class TailingH264Decoder {
                 allocator: nil, valueOut: &value)
             if queried == noErr, let value {
                 backendDescription = CFBooleanGetValue(value.takeRetainedValue()) ? CWL("硬件解码") : CWL("CPU 软件解码")
-            } else { backendDescription = CWL("请求 CPU 软件解码（系统未提供类型查询）") }
+            } else if !allowHardwareAcceleration { backendDescription = CWL("请求 CPU 软件解码（系统未提供类型查询）") }
         }
         _ = VTSessionSetProperty(created, key: kVTDecompressionPropertyKey_RealTime, value: kCFBooleanTrue)
     }
@@ -223,6 +224,16 @@ enum TailingH264DecoderError: LocalizedError {
     case sampleBuffer(OSStatus)
     case decode(OSStatus)
     case invalidated
+
+    var canRetryWithSoftware: Bool {
+        switch self {
+        case .create, .invalidated: return true
+        case .decode(let status):
+            return status == kVTVideoDecoderNotAvailableNowErr || status == kVTVideoDecoderMalfunctionErr ||
+                   status == kVTInvalidSessionErr
+        default: return false
+        }
+    }
 
     var errorDescription: String? {
         switch self {
